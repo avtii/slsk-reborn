@@ -1,0 +1,507 @@
+diff --git a/src/aioslsk/file_access.py b/src/aioslsk/file_access.py
+new file mode 100644
+index 0000000..f41b870
+--- /dev/null
++++ b/src/aioslsk/file_access.py
+@@ -0,0 +1,95 @@
++"""File access relative to a user-configured transfer directory."""
++from collections.abc import Iterator
++from contextlib import contextmanager
++import os
++from pathlib import Path, PureWindowsPath
++import re
++import stat
++from typing import Optional
++
++
++def validate_component(name: str) -> None:
++    if not name or name in ('.', '..') or '\x00' in name:
++        raise OSError("invalid transfer path component")
++    if os.name == 'nt':
++        if hasattr(os.path, 'isreserved'):  # Added in Python 3.13
++            reserved = os.path.isreserved(name)
++        else:
++            reserved = PureWindowsPath(name).is_reserved()
++        if reserved or re.search(r'[<>:"|?*\x00-\x1f]|[. ]$', name):
++            raise OSError("invalid Windows transfer path component")
++
++
++@contextmanager
++def _parent(root: str, filename: str, create: bool = False) -> Iterator[tuple[Optional[int], str]]:
++    # Keep the original components: resolving or normalizing first would hide
++    # parent references. All callers supply paths below an absolute root.
++    try:
++        parts = Path(filename).relative_to(root).parts
++    except ValueError as exc:
++        raise OSError("transfer path outside configured directory") from exc
++    if not parts:
++        raise OSError("transfer path requires a filename")
++    for part in parts:
++        validate_component(part)
++    if create:
++        os.makedirs(root, exist_ok=True)
++
++    if os.name == 'posix':
++        flags = os.O_DIRECTORY | os.O_RDONLY
++        fd = os.open(root, flags)
++        try:
++            for part in parts[:-1]:
++                if create:
++                    try:
++                        os.mkdir(part, dir_fd=fd)
++                    except FileExistsError:
++                        pass
++                child = os.open(part, flags | os.O_NOFOLLOW, dir_fd=fd)
++                os.close(fd)
++                fd = child
++            yield fd, parts[-1]
++        finally:
++            os.close(fd)
++    else:
++        # Windows has no dir_fd support. Reject reparse points, including
++        # junctions, beneath the user-selected root.
++        path = root
++        for index, part in enumerate(parts):
++            path = os.path.join(path, part)
++            try:
++                info = os.lstat(path)
++            except FileNotFoundError:
++                if index < len(parts) - 1 and create:
++                    os.mkdir(path)
++                continue
++            if info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
++                raise OSError("reparse point in transfer path")
++        yield None, path
++
++
++def open_transfer_file(root: str, filename: str, flags: int) -> int:
++    """Opener for builtins.open / aiofiles.open that accepts regular files only."""
++    with _parent(root, filename, create=bool(flags & os.O_CREAT)) as (parent, name):
++        flags |= getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
++        fd = os.open(name, flags, 0o666, dir_fd=parent)
++        try:
++            if not stat.S_ISREG(os.fstat(fd).st_mode):
++                raise OSError("transfer path is not a regular file")
++            return fd
++        except BaseException:
++            os.close(fd)
++            raise
++
++
++def transfer_stat(root: str, filename: str) -> os.stat_result:
++    with _parent(root, filename) as (parent, name):
++        info = os.stat(name, dir_fd=parent, follow_symlinks=False)
++        if not stat.S_ISREG(info.st_mode):
++            raise OSError("transfer path is not a regular file")
++        return info
++
++
++def unlink_download(root: str, filename: str) -> None:
++    with _parent(root, filename) as (parent, name):
++        os.unlink(name, dir_fd=parent)
+diff --git a/src/aioslsk/naming.py b/src/aioslsk/naming.py
+index 9ee05a1..13078bd 100644
+--- a/src/aioslsk/naming.py
++++ b/src/aioslsk/naming.py
+@@ -1,6 +1,7 @@
+ import os
+ import re
+ 
++from .file_access import validate_component
+ from .utils import split_remote_path
+ 
+ 
+@@ -28,7 +29,10 @@ class DefaultNamingStrategy(NamingStrategy):
+     """
+ 
+     def apply(self, remote_path: str, local_dir: str, local_filename: str) -> tuple[str, str]:
+-        return local_dir, split_remote_path(remote_path)[-1]
++        parts = split_remote_path(remote_path)
++        filename = parts[-1] if parts else ''
++        validate_component(filename)
++        return local_dir, filename
+ 
+ 
+ class KeepDirectoryStrategy(NamingStrategy):
+@@ -51,6 +55,7 @@ class KeepDirectoryStrategy(NamingStrategy):
+         elif re.match(r'[a-zA-Z]{1}:', contained_dir) is not None:
+             return local_dir, local_filename
+ 
++        validate_component(contained_dir)
+         return os.path.join(local_dir, contained_dir), local_filename
+ 
+ 
+@@ -70,18 +75,17 @@ class NumberDuplicateStrategy(DuplicateNamingStrategy):
+         # Find all files which are already numbered
+         filename, extension = os.path.splitext(local_filename)
+         pattern = re.escape(filename) + self.PATTERN + re.escape(extension)
+-        indices = []
++        indices = set()
+         for path_file in os.listdir(local_dir):
+-            if (match := re.match(pattern, path_file)) is not None:
+-                indices.append(int(match.group(1)))
++            if (match := re.fullmatch(pattern, path_file)) is not None:
++                indices.add(int(match.group(1)))
+ 
+         # Find the next free index
+         next_index = 1
+         if indices:
+-            # +1 to include the max, +2 so that we get the next one in case all
+-            # indices are already taken
+-            possible_indices = set(range(min(indices), max(indices) + 2))
+-            next_index = min(possible_indices - set(indices))
++            next_index = min(indices)
++            while next_index in indices:
++                next_index += 1
+ 
+         new_filename = f"{filename} ({next_index}){extension}"
+         return local_dir, new_filename
+diff --git a/src/aioslsk/shares/manager.py b/src/aioslsk/shares/manager.py
+index 70069b9..576960c 100644
+--- a/src/aioslsk/shares/manager.py
++++ b/src/aioslsk/shares/manager.py
+@@ -14,6 +14,7 @@ from typing import Optional
+ import uuid
+ from weakref import WeakSet
+ 
++from ..file_access import open_transfer_file, transfer_stat
+ from ..base_manager import BaseManager
+ from .cache import SharesNullCache, SharesCache
+ from ..events import (
+@@ -94,7 +95,7 @@ def scan_directory(
+         for filename in files:
+             filepath = os.path.join(directory, filename)
+             try:
+-                modified = os.path.getmtime(os.path.join(directory, filename))
++                modified = transfer_stat(shared_directory.absolute_path, filepath).st_mtime
+             except OSError:
+                 logger.debug("could not get modified time for file : %r ", filepath)
+             else:
+@@ -105,14 +106,17 @@ def scan_directory(
+     return shared_items
+ 
+ 
+-def extract_attributes(filepath: str) -> ItemAttributes:
++def extract_attributes(filepath: str, root: Optional[str] = None) -> ItemAttributes:
+     """Attempts to extract attributes from the file at ``filepath``. If there was
+     an error attempting to extract the attributes this method will log a warning
+     and return an empty list of attributes
+     """
+     attributes = []
+     try:
+-        mutagen_file = mutagen.File(filepath)
++        filepath = os.path.abspath(filepath)
++        opener = partial(open_transfer_file, root or os.path.dirname(filepath))
++        with open(filepath, 'rb', opener=opener) as handle:
++            mutagen_file = mutagen.File(handle)
+         if not mutagen_file:
+             return []
+ 
+@@ -136,7 +140,7 @@ def extract_attributes(filepath: str) -> ItemAttributes:
+                 (5, mutagen_file.info.bits_per_sample, ),
+             ]
+ 
+-    except mutagen.MutagenError as exc:
++    except (mutagen.MutagenError, OSError) as exc:
+         logger.warning(
+             "failed retrieve audio file metadata. path=%r", filepath, exc_info=exc)
+ 
+@@ -339,10 +343,12 @@ class SharesManager(BaseManager):
+             ``username``
+         """
+         item = self.get_shared_item_cache(remote_path, username=username)
+-        if not await asyncos.path.exists(item.get_absolute_path()):
++        try:
++            await asyncio.to_thread(transfer_stat, item.shared_directory.absolute_path, item.get_absolute_path())
++        except OSError as exc:
+             raise FileNotFoundError(
+-                f"file with remote_path {remote_path} found in cache but not on disk"
+-            )
++                f"file with remote_path {remote_path} is no longer shareable"
++            ) from exc
+         return item
+ 
+     def find_shared_item_cache(
+@@ -593,7 +599,7 @@ class SharesManager(BaseManager):
+             if item.attributes is None:
+                 future = loop.run_in_executor(
+                     self.executor,
+-                    partial(extract_attributes, item.get_absolute_path())
++                    partial(extract_attributes, item.get_absolute_path(), shared_directory.absolute_path)
+                 )
+                 future.add_done_callback(
+                     partial(self._extract_attributes_callback, item)
+@@ -648,7 +654,9 @@ class SharesManager(BaseManager):
+         await self.report_shares()
+ 
+     async def get_filesize(self, shared_item: SharedItem) -> int:
+-        return await asyncos.path.getsize(shared_item.get_absolute_path())
++        info = await asyncio.to_thread(
++            transfer_stat, shared_item.shared_directory.absolute_path, shared_item.get_absolute_path())
++        return info.st_size
+ 
+     def query(
+         self,
+diff --git a/src/aioslsk/shares/utils.py b/src/aioslsk/shares/utils.py
+index 8cc3b34..5fb30d0 100644
+--- a/src/aioslsk/shares/utils.py
++++ b/src/aioslsk/shares/utils.py
+@@ -4,6 +4,7 @@ import os
+ import re
+ from typing import TYPE_CHECKING
+ 
++from ..file_access import transfer_stat
+ from ..constants import PATH_SEPERATOR_PATTERN
+ from ..protocol.primitives import Attribute, FileData
+ 
+@@ -47,7 +48,7 @@ def convert_item_to_file_data(
+     :raise OSError: raised when an error occurred accessing the file
+     """
+     file_path = shared_item.get_absolute_path()
+-    file_size = os.path.getsize(file_path)
++    file_size = transfer_stat(shared_item.shared_directory.absolute_path, file_path).st_size
+     file_ext = os.path.splitext(shared_item.filename)[-1][1:]
+     if shared_item.attributes:
+         attributes = [Attribute(*attr) for attr in shared_item.attributes]
+diff --git a/src/aioslsk/transfer/manager.py b/src/aioslsk/transfer/manager.py
+index ee47e9c..361bffc 100644
+--- a/src/aioslsk/transfer/manager.py
++++ b/src/aioslsk/transfer/manager.py
+@@ -1,6 +1,6 @@
+ from __future__ import annotations
+ import aiofiles
+-from aiofiles import os as asyncos
++from functools import partial
+ import asyncio
+ from enum import auto, Flag
+ import logging
+@@ -9,6 +9,7 @@ import os
+ import time
+ from typing import Optional, TYPE_CHECKING
+ 
++from ..file_access import open_transfer_file, transfer_stat
+ from ..base_manager import BaseManager
+ from .cache import TransferNullCache, TransferCache
+ from ..constants import (
+@@ -334,6 +335,8 @@ class TransferManager(BaseManager):
+                 return queued_transfer
+ 
+         logger.info("adding transfer : %s", transfer)
++        if transfer.is_download():
++            transfer._download_root = os.path.abspath(self._settings.shares.download)
+         transfer.state_listeners.append(self)
+         self._transfers.append(transfer)
+ 
+@@ -673,14 +676,6 @@ class TransferManager(BaseManager):
+         ranking.sort(key=itemgetter(0))
+         return list(reversed([upload for _, upload in ranking]))
+ 
+-    async def _prepare_download_path(self, transfer: Transfer):
+-        if transfer.local_path is None:
+-            download_path, file_path = self._shares_manager.calculate_download_path(transfer.remote_path)
+-            transfer.local_path = os.path.join(download_path, file_path)
+-
+-        path, _ = os.path.split(transfer.local_path)
+-        await self._shares_manager.create_directory(path)
+-
+     async def _calculate_offset(self, transfer: Transfer) -> int:
+         """Calculates the offset when downloading a file by inspecting the file
+         at the local path.
+@@ -688,11 +683,12 @@ class TransferManager(BaseManager):
+         :return: the calculated offset (in bytes)
+         """
+         # Shouldn't occur but this is to keep the typing happy
+-        if not transfer.local_path:
++        if not transfer.local_path or not transfer._download_root:
+             return 0
+ 
+         try:
+-            return await asyncos.path.getsize(transfer.local_path)
++            info = await asyncio.to_thread(transfer_stat, transfer._download_root, transfer.local_path)
++            return info.st_size
+         except (OSError, TypeError):
+             return 0
+ 
+@@ -1011,14 +1007,16 @@ class TransferManager(BaseManager):
+                 raise AioSlskException(
+                     f"attempted to upload a transfer that doesn't have a local path set : {transfer}")
+ 
+-            async with aiofiles.open(transfer.local_path, mode='rb') as handle:
++            item = self._shares_manager.get_shared_item_cache(transfer.remote_path, transfer.username)
++            opener = partial(open_transfer_file, item.shared_directory.absolute_path)
++            async with aiofiles.open(item.get_absolute_path(), mode='rb', opener=opener) as handle:
+                 await handle.seek(transfer.bytes_transfered)
+                 await connection.send_file(
+                     handle,
+                     transfer._transfer_progress_callback
+                 )
+ 
+-        except OSError:
++        except (OSError, FileNotSharedError, FileNotFoundError):
+             logger.exception("error opening local file : %s", transfer.local_path)
+             await transfer.state.fail(reason=FailReason.FILE_READ_ERROR)
+             await connection.disconnect(CloseReason.REQUESTED)
+@@ -1091,27 +1089,26 @@ class TransferManager(BaseManager):
+         :param transfer: :class:`.Transfer` object of the download
+         :param connection: connection on which file should be received
+         """
+-        try:
+-            await self._prepare_download_path(transfer)
+-        except OSError:
+-            logger.exception("failed to create path : %s", transfer.local_path)
+-            await connection.disconnect(CloseReason.REQUESTED)
+-            await transfer.state.fail(reason=FailReason.FILE_READ_ERROR)
+-            return
+-
+         connection.set_connection_state(PeerConnectionState.TRANSFERRING)
+         await transfer.state.start_transferring()
+ 
+-        if transfer.local_path is None:  # pragma: no cover
+-            raise AioSlskException(
+-                f"attempted to start download for which local_path was not set : {transfer}")
+-
+         if transfer.filesize is None:  # pragma: no cover
+             raise AioSlskException(
+                 f"attempted to start download for which filesize was not set : {transfer}")
+ 
+         try:
+-            async with aiofiles.open(transfer.local_path, mode='ab') as handle:
++            if not transfer._download_root:
++                raise OSError("missing configured download directory")
++            opener = partial(open_transfer_file, transfer._download_root)
++            if transfer.local_path is None:
++                directory, name = self._shares_manager.calculate_download_path(transfer.remote_path)
++                destination = os.path.join(directory, name)
++                mode = 'xb'
++            else:
++                destination = transfer.local_path
++                mode = 'ab'
++            async with aiofiles.open(destination, mode=mode, opener=opener) as handle:
++                transfer.local_path = destination
+                 await connection.receive_file(
+                     handle,
+                     transfer.filesize - transfer.bytes_transfered,
+diff --git a/src/aioslsk/transfer/model.py b/src/aioslsk/transfer/model.py
+index 6d01e6a..97a8914 100644
+--- a/src/aioslsk/transfer/model.py
++++ b/src/aioslsk/transfer/model.py
+@@ -65,6 +65,7 @@ class TransferProgressSnapshot:
+ class Transfer:
+     """Class representing a transfer"""
+     _UNPICKABLE_FIELDS = (
++        '_download_root',
+         '_speed_log',
+         '_transfer_task',
+         '_remotely_queue_task',
+@@ -82,6 +83,7 @@ class Transfer:
+         """Username of the peer"""
+         self.remote_path: str = remote_path
+         """Remote path, this is the path that is shared between peers"""
++        self._download_root: Optional[str] = None
+         self.local_path: Optional[str] = None
+         """Absolute path to the file on disk"""
+ 
+@@ -148,6 +150,7 @@ class Transfer:
+         self._remotely_queue_task = None
+         self._transfer_task = None
+         self._state_lock = asyncio.Lock()
++        self._download_root = None
+         self.state_listeners = []
+         self.progress_snapshot = self.take_progress_snapshot()
+ 
+diff --git a/src/aioslsk/transfer/state.py b/src/aioslsk/transfer/state.py
+index 1ceb9ba..ef2836a 100644
+--- a/src/aioslsk/transfer/state.py
++++ b/src/aioslsk/transfer/state.py
+@@ -1,5 +1,5 @@
+ """Implementation of the state design pattern for transfers"""
+-from aiofiles import os as asyncos
++from ..file_access import unlink_download
+ import asyncio
+ from enum import Enum
+ import inspect
+@@ -31,8 +31,10 @@ async def _remove_local_file(transfer: 'Transfer'):
+     if transfer.local_path:
+         logger.info("removing file from filesystem : %s", transfer.local_path)
+         try:
+-            if await asyncos.path.exists(transfer.local_path):
+-                await asyncos.remove(transfer.local_path)
++            if transfer._download_root:
++                await asyncio.to_thread(unlink_download, transfer._download_root, transfer.local_path)
++        except FileNotFoundError:
++            pass
+         except OSError:
+             logger.warning("failed to remove file during abort : %s", transfer.local_path)
+ 
+diff --git a/tests/unit/shares/test_shares_manager.py b/tests/unit/shares/test_shares_manager.py
+index 75bb63b..de673e0 100644
+--- a/tests/unit/shares/test_shares_manager.py
++++ b/tests/unit/shares/test_shares_manager.py
+@@ -644,7 +644,7 @@ class TestSharesManager:
+ 
+         remote_path = list(manager.shared_directories[1].items)[0].get_remote_path()
+ 
+-        with patch('aiofiles.os.path.exists', return_value=False):
++        with patch('aioslsk.shares.manager.transfer_stat', side_effect=OSError):
+             with pytest.raises(FileNotFoundError):
+                 await manager.get_shared_item(remote_path)
+ 
+diff --git a/tests/unit/test_file_access.py b/tests/unit/test_file_access.py
+new file mode 100644
+index 0000000..9adba1b
+--- /dev/null
++++ b/tests/unit/test_file_access.py
+@@ -0,0 +1,20 @@
++"""Ordinary transfer path operations, independent of the protocol."""
++from functools import partial
++
++from aioslsk.file_access import open_transfer_file, transfer_stat, unlink_download
++
++
++def test_nested_album_can_be_downloaded_resumed_shared_and_removed(tmp_path):
++    root = str(tmp_path / 'music')
++    filename = str(tmp_path / 'music' / 'Live Album' / 'Track 01.mp3')
++    opener = partial(open_transfer_file, root)
++
++    with open(filename, 'xb', opener=opener) as output:
++        output.write(b'first ')
++    with open(filename, 'ab', opener=opener) as output:
++        output.write(b'second')
++    with open(filename, 'rb', opener=opener) as source:
++        assert source.read() == b'first second'
++    assert transfer_stat(root, filename).st_size == 12
++    unlink_download(root, filename)
++    assert list((tmp_path / 'music' / 'Live Album').iterdir()) == []
+diff --git a/tests/unit/transfer/test_transfer_manager.py b/tests/unit/transfer/test_transfer_manager.py
+index 29c3ff5..7be32f7 100644
+--- a/tests/unit/transfer/test_transfer_manager.py
++++ b/tests/unit/transfer/test_transfer_manager.py
+@@ -119,21 +119,21 @@ class TestTransferManager:
+         assert transfer.state.VALUE == TransferState.QUEUED
+ 
+     @pytest.mark.asyncio
+-    async def test_whenAbortTransfer_download_shouldSetAbortStateAndDeleteFile(self, manager: TransferManager):
++    async def test_whenAbortTransfer_download_shouldSetAbortStateAndDeleteFile(self, manager: TransferManager, tmp_path):
+         transfer = Transfer(DEFAULT_USERNAME, DEFAULT_FILENAME, TransferDirection.DOWNLOAD)
+-        local_path = '/some/path.mp3'
+-        transfer.local_path = local_path
++        manager._settings.shares.download = str(tmp_path)
++        local_path = tmp_path / 'partial.mp3'
++        local_path.touch()
++        transfer.local_path = str(local_path)
+         await manager.add(transfer)
+ 
+         await transfer.state.queue()
+         await transfer.state.initialize()
+         await transfer.state.start_transferring()
+-        with patch('aiofiles.os.path.exists', return_value=True):
+-            with patch('aiofiles.os.remove', return_value=None) as patched_remove:
+-                await manager.abort(transfer)
++        await manager.abort(transfer)
+ 
+         assert transfer.state.VALUE == TransferState.ABORTED
+-        patched_remove.assert_awaited_once_with(local_path)
++        assert not local_path.exists()
+ 
+     @pytest.mark.asyncio
+     async def test_whenAbortTransfer_upload_shouldSetAbortState(self, manager: TransferManager):

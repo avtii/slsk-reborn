@@ -42,19 +42,16 @@ Run them from a terminal: Windows Terminal on Windows, Terminal or iTerm2 on mac
 
 ## Install from source
 
-Requires Python 3.11 or newer.
-
-```sh
-pip install git+https://github.com/avtii/slsk-reborn
-```
-
-or, from a clone:
+Use Python 3.11 or newer and Git. From an activated virtual environment:
 
 ```sh
 git clone https://github.com/avtii/slsk-reborn
 cd slsk-reborn
-pip install -e ".[dev]"
+python packaging/aioslsk/install.py
+python -m pip install .
 ```
+
+The first Python command builds aioslsk 1.7.2 with the transfer path and message-size fixes in this repository. Release executable builds run the same step. Installing only the slsk-reborn wheel or Git URL uses the dependency from your Python package index, which may lack these fixes. To install development tools from the clone, use `python -m pip install -e ".[dev]"` in the final step.
 
 ## Run
 

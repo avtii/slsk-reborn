@@ -1,0 +1,158 @@
+diff --git a/src/aioslsk/constants.py b/src/aioslsk/constants.py
+index 10906c0..8c59d44 100644
+--- a/src/aioslsk/constants.py
++++ b/src/aioslsk/constants.py
+@@ -6,6 +6,10 @@ DEFAULT_PARENT_MIN_SPEED: int = 1
+ DEFAULT_PARENT_SPEED_RATIO: int = 50
+ DEFAULT_WISHLIST_INTERVAL: int = 600
+ DEFAULT_READ_TIMEOUT: float = 60
++MAX_MESSAGE_SIZE: int = 16 * 1024 * 1024
++"""Maximum inbound frame body in bytes, including its message ID."""
++MAX_DECOMPRESSED_MESSAGE_SIZE: int = 64 * 1024 * 1024
++"""Maximum payload in bytes after decompressing a protocol message."""
+ PEER_CONNECT_TIMEOUT: float = 10
+ """Direct connection timeout"""
+ PEER_INDIRECT_CONNECT_TIMEOUT: float = 60
+diff --git a/src/aioslsk/network/connection.py b/src/aioslsk/network/connection.py
+index dbbd0dd..f2fe7dd 100644
+--- a/src/aioslsk/network/connection.py
++++ b/src/aioslsk/network/connection.py
+@@ -13,6 +13,7 @@ import sys
+ from ..constants import (
+     DEFAULT_READ_TIMEOUT,
+     DISCONNECT_TIMEOUT,
++    MAX_MESSAGE_SIZE,
+     PEER_CONNECT_TIMEOUT,
+     PEER_READ_TIMEOUT,
+     SERVER_CONNECT_TIMEOUT,
+@@ -304,7 +305,7 @@ class DataConnection(Connection, abc.ABC):
+ 
+             except MessageDeserializationError as exc:
+                 adapter.warning(
+-                    "failed to deserialize message : %s", exc.proto_message, extra=self.__dict__)
++                    "failed to deserialize %d-byte message", len(exc.proto_message), extra=self.__dict__)
+ 
+             else:
+ 
+@@ -376,6 +377,9 @@ class DataConnection(Connection, abc.ABC):
+         message_len_buf = obfuscation.decode(header) if self.obfuscated else header
+         _, message_len = uint32.deserialize(0, message_len_buf)
+ 
++        if message_len > MAX_MESSAGE_SIZE:
++            raise ValueError(f"message length {message_len} exceeds maximum {MAX_MESSAGE_SIZE}")
++
+         message = await self._reader.readexactly(message_len)
+ 
+         return header + message
+diff --git a/src/aioslsk/protocol/primitives.py b/src/aioslsk/protocol/primitives.py
+index 35a086e..2afac91 100644
+--- a/src/aioslsk/protocol/primitives.py
++++ b/src/aioslsk/protocol/primitives.py
+@@ -46,6 +46,8 @@ from typing import (
+ )
+ import zlib
+ 
++from ..constants import MAX_DECOMPRESSED_MESSAGE_SIZE
++
+ logger = logging.getLogger(__name__)
+ 
+ 
+@@ -430,15 +432,19 @@ class MessageDataclass(ProtocolDataclass):
+ 
+         # Parametered super call due to issue: https://github.com/python/cpython/issues/90562
+         if decompress:
+-            message = zlib.decompress(message[pos:])
++            decoder = zlib.decompressobj()
++            message = decoder.decompress(memoryview(message)[pos:], MAX_DECOMPRESSED_MESSAGE_SIZE + 1)
++            if len(message) > MAX_DECOMPRESSED_MESSAGE_SIZE:
++                raise ValueError(f"decompressed message exceeds {MAX_DECOMPRESSED_MESSAGE_SIZE} bytes")
++            if not decoder.eof:
++                raise zlib.error("incomplete compressed message")
+             pos, obj = super(MessageDataclass, cls).deserialize(0, message)
+         else:
+             pos, obj = super(MessageDataclass, cls).deserialize(pos, message)
+ 
+         if pos < len(message):  # check if there's any unparsed bytes left
+             logger.warning(
+-                "message has %d unparsed bytes : %r",
+-                len(message[pos:]), message
++                "message has %d unparsed bytes", len(message) - pos
+             )
+ 
+         return obj
+diff --git a/tests/unit/network/test_connection.py b/tests/unit/network/test_connection.py
+index 6cb2fae..ce3f5c4 100644
+--- a/tests/unit/network/test_connection.py
++++ b/tests/unit/network/test_connection.py
+@@ -184,6 +184,33 @@ class TestDataConnection:
+         actual_message = await connection.receive_message()
+         assert expected_message == actual_message
+ 
++    @pytest.mark.asyncio
++    @pytest.mark.parametrize('obfuscated', [False, True])
++    @pytest.mark.parametrize('over_limit', [False, True])
++    async def test_receiveMessage_sizeLimit(self, network, monkeypatch, obfuscated, over_limit):
++        frame = LeaveRoom.Response('room').serialize()
++        body_size = len(frame) - 4
++        monkeypatch.setattr('aioslsk.network.connection.MAX_MESSAGE_SIZE', body_size - int(over_limit))
++        header_size = 4
++        if obfuscated:
++            frame = encode(frame)
++            header_size = 8
++
++        connection = self._create_connection(network)
++        connection.obfuscated = obfuscated
++        connection.disconnect = AsyncMock()
++        read = AsyncMock(side_effect=(frame[:header_size], frame[header_size:]))
++        connection._reader = Mock(readexactly=read)
++
++        if over_limit:
++            with pytest.raises(ConnectionReadError):
++                await connection.receive_message()
++            read.assert_awaited_once_with(header_size)
++            connection.disconnect.assert_awaited_once_with(CloseReason.READ_ERROR)
++        else:
++            assert await connection.receive_message() == frame
++            assert read.await_args_list == [call(header_size), call(body_size)]
++
+     @pytest.mark.asyncio
+     async def test_receiveMessage_exception_shouldDisconnectAndRaise(self, network: Network):
+         connection = self._create_connection(network)
+diff --git a/tests/unit/protocol/test_primitives.py b/tests/unit/protocol/test_primitives.py
+index e411464..93d5d28 100644
+--- a/tests/unit/protocol/test_primitives.py
++++ b/tests/unit/protocol/test_primitives.py
+@@ -1,8 +1,10 @@
+ from dataclasses import dataclass, field
+ import logging
++import zlib
+ from typing import ClassVar
+ import pytest
+ 
++from aioslsk.protocol.messages import LeaveRoom
+ from aioslsk.protocol.primitives import (
+     decode_string,
+     Attribute,
+@@ -47,6 +49,22 @@ class TestMessageDataclass:
+         assert caplog.records[-1].levelname == 'WARNING'
+         assert 'message has 1 unparsed bytes' in caplog.records[-1].getMessage()
+ 
++    def test_compressedPayloadSizeLimit(self, monkeypatch):
++        message = LeaveRoom.Response('room')
++        payload_size = len(message.serialize()) - 8  # exclude length and message ID
++        compressed = message.serialize(compress=True)
++        monkeypatch.setattr('aioslsk.protocol.primitives.MAX_DECOMPRESSED_MESSAGE_SIZE', payload_size)
++        assert LeaveRoom.Response.deserialize(0, compressed, decompress=True) == message
++
++        monkeypatch.setattr('aioslsk.protocol.primitives.MAX_DECOMPRESSED_MESSAGE_SIZE', payload_size - 1)
++        with pytest.raises(ValueError, match='decompressed message exceeds'):
++            LeaveRoom.Response.deserialize(0, compressed, decompress=True)
++
++    def test_incompleteCompressedPayload(self):
++        compressed = LeaveRoom.Response('room').serialize(compress=True)
++        with pytest.raises(zlib.error):
++            LeaveRoom.Response.deserialize(0, compressed[:-1], decompress=True)
++
+     def test_whenDeserialize_mismatchMessageId_shouldRaise(self):
+         data = bytes.fromhex('0400000002000000')
+         with pytest.raises(Exception):

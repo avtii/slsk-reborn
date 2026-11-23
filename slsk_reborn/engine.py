@@ -133,6 +133,7 @@ class Engine:
         self.bus = bus
         self.connected = False
         self.username = cfg.username
+        self.active_download_dir: str | None = None
 
     # lifecycle
     async def start(self) -> None: ...
@@ -168,6 +169,23 @@ class Engine:
     def shared_dirs(self) -> list[tuple[str, int]]: ...
     async def add_share(self, path: str) -> None: ...
     async def remove_share(self, path: str) -> None: ...
+    async def sync_download_share(self) -> None:
+        """Apply the automatic share setting to this session's download folder."""
+        path = self.active_download_dir
+        if path is None:
+            return
+
+        def path_key(folder: str) -> str:
+            return os.path.normcase(os.path.abspath(folder))
+
+        key = path_key(path)
+        wanted = self.cfg.share_downloads or any(path_key(d) == key for d in self.cfg.shared_dirs)
+        current = next((d for d, _ in self.shared_dirs() if path_key(d) == key), None)
+        if wanted and current is None:
+            await self.add_share(path)
+        elif not wanted and current is not None:
+            await self.remove_share(current)
+
     async def rescan(self) -> None: ...
     def apply_limits(self) -> None: ...
     def apply_lists(self) -> None: ...   # cfg.friends / blocked / wishlist changed
@@ -286,6 +304,9 @@ class SlskEngine(Engine):
 
         self.bus.emit("status", state="connecting", detail="server.slsknet.org:2416")
         await self.client.start()
+        self.active_download_dir = self.client.settings.shares.download
+        # Settings can be saved while the network and share cache are starting.
+        await self.sync_download_share()
         await self.client.login()
         self.connected = True
         self.bus.emit("status", state="online", detail=self.cfg.username)

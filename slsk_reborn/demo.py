@@ -49,7 +49,10 @@ class DemoEngine(Engine):
         self._xfers: dict[tuple, Xfer] = {}
         self._tasks: set[asyncio.Task] = set()
         self._rooms: dict[str, list[str]] = {}
-        self._shares = [(cfg.download_dir, 214), (r"D:\Music\Electronic", 3812)]
+        self.active_download_dir = cfg.download_dir
+        self._shares = [(r"D:\Music\Electronic", 3812)]
+        if cfg.share_downloads or cfg.download_dir in cfg.shared_dirs:
+            self._shares.insert(0, (cfg.download_dir, 214))
         self._libs: dict[str, list[Folder]] = {}
         self._stopped: set[int] = set()
 

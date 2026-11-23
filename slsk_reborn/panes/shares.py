@@ -50,8 +50,8 @@ class SharesPane(Horizontal):
             yield Checkbox("Notify + bell when downloads finish", id="set-notify")
             yield Checkbox("Failed download: try the same file from another user", id="set-fallback")
             yield Button("Save settings", variant="primary", id="set-save")
-            yield Static(Text("Port, UPnP and download folder apply on next start; the rest apply now.",
-                              "dim"), id="set-note")
+            yield Static(Text("Port, UPnP and download location apply on next start. Download sharing applies now. "
+                              "Files under separately shared folders stay shared.", "dim"), id="set-note")
 
     def on_mount(self) -> None:
         t = self.query_one("#shares-table", DataTable)
@@ -164,7 +164,8 @@ class SharesPane(Horizontal):
         cfg = self.app.cfg
         if path in cfg.shared_dirs:
             cfg.shared_dirs.remove(path)
-        if os.path.normcase(path) == os.path.normcase(cfg.download_dir):
+        current_download_dir = self.app.engine.active_download_dir or cfg.download_dir
+        if os.path.normcase(os.path.abspath(path)) == os.path.normcase(os.path.abspath(current_download_dir)):
             cfg.share_downloads = False
             self.query_one("#set-sharedl", Checkbox).value = False
         cfg.save()
@@ -180,7 +181,7 @@ class SharesPane(Horizontal):
         await self.app.engine.rescan()
 
     @on(Button.Pressed, "#set-save")
-    def _save(self) -> None:
+    async def _save(self) -> None:
         c = self.app.cfg
 
         def num(wid: str, default: int) -> int:
@@ -202,5 +203,12 @@ class SharesPane(Horizontal):
         c.auto_fallback = self.query_one("#set-fallback", Checkbox).value
         c.save()
         self.app.engine.apply_limits()
+        try:
+            await self.app.engine.sync_download_share()
+        except Exception as e:
+            self.refresh_table()
+            self.notify(f"Settings saved, but updating the live download share failed: {e}. "
+                        "Check the shares list and save again to retry.", severity="error")
+            return
         self.notify("Settings saved", title="⚙")
         self._log("settings saved")

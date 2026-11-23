@@ -209,7 +209,8 @@ HELP = """\
 
 [b $primary]Transfers[/]
   [b]enter[/] play   [b]p[/] pause   [b]r[/] resume/retry   [b]x[/] abort   [b]del[/] remove   [b]c[/] clear finished
-  [b]o[/] open download folder
+  [b]o[/] open download folder   [b]n[/] get the same file from another user (failed or stuck in a queue)
+  Failed downloads try another user once by themselves (Shares → settings to turn off).
 
 [b $primary]Browse[/]
   Type a username. [b]enter[/] downloads a file, [b]d[/] downloads a whole folder.

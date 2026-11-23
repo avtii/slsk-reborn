@@ -113,6 +113,10 @@ class Bus:
     def on(self, name: str, fn: Callable) -> None:
         self._subs[name].append(fn)
 
+    def off(self, name: str, fn: Callable) -> None:
+        if fn in self._subs.get(name, ()):
+            self._subs[name].remove(fn)
+
     def emit(self, name: str, **data) -> None:
         for fn in list(self._subs.get(name, ())):
             try:

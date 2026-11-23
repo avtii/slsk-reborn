@@ -48,6 +48,7 @@ class SharesPane(Horizontal):
             yield Checkbox("Share my download folder", id="set-sharedl")
             yield Checkbox("UPnP port forwarding", id="set-upnp")
             yield Checkbox("Notify + bell when downloads finish", id="set-notify")
+            yield Checkbox("Failed download: try the same file from another user", id="set-fallback")
             yield Button("Save settings", variant="primary", id="set-save")
             yield Static(Text("Port, UPnP and download folder apply on next start; the rest apply now.",
                               "dim"), id="set-note")
@@ -70,6 +71,7 @@ class SharesPane(Horizontal):
         self.query_one("#set-sharedl", Checkbox).value = c.share_downloads
         self.query_one("#set-upnp", Checkbox).value = c.upnp
         self.query_one("#set-notify", Checkbox).value = c.notify_downloads
+        self.query_one("#set-fallback", Checkbox).value = c.auto_fallback
 
     def refresh_table(self) -> None:
         t = self.query_one("#shares-table", DataTable)
@@ -197,6 +199,7 @@ class SharesPane(Horizontal):
         c.share_downloads = self.query_one("#set-sharedl", Checkbox).value
         c.upnp = self.query_one("#set-upnp", Checkbox).value
         c.notify_downloads = self.query_one("#set-notify", Checkbox).value
+        c.auto_fallback = self.query_one("#set-fallback", Checkbox).value
         c.save()
         self.app.engine.apply_limits()
         self.notify("Settings saved", title="⚙")

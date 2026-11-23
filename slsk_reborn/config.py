@@ -30,6 +30,7 @@ class Config:
     welcomed: bool = False  # first-run sharing/ports notes were shown
     volume: float = 0.8
     album_view: bool = False  # search results grouped by folder
+    auto_fallback: bool = True  # failed download -> search for the same file elsewhere
     notify_downloads: bool = True  # toast per finished file, bell when the queue empties
     friends: list[str] = field(default_factory=list)
     blocked: list[str] = field(default_factory=list)

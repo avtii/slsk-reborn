@@ -13,6 +13,7 @@ from textual.containers import Vertical
 from textual.widgets import DataTable, Static
 
 from ..engine import Xfer
+from ..fallback import norm_name
 from ..util import bar, basename, eta, human_size, human_speed, short_dir, user_color
 
 STATE_STYLE = {
@@ -37,6 +38,7 @@ class TransferTable(DataTable):
         Binding("p", "pause", "Pause"),
         Binding("r", "resume", "Resume/retry"),
         Binding("x", "abort", "Abort"),
+        Binding("n", "other_source", "Other source"),
         Binding("delete", "remove", "Remove"),
         Binding("c", "clear_done", "Clear finished"),
         Binding("o", "open", "Open folder"),
@@ -161,6 +163,15 @@ class TransferTable(DataTable):
         else:
             self.app.notify("File not found on disk", severity="warning")
 
+    def action_other_source(self):
+        x = self.current()
+        if x is None or x.upload:
+            return
+        if x.state == "done":
+            self.app.notify("Already downloaded", severity="warning")
+            return
+        self.app.find_alternative(x)
+
     def action_open(self):
         x = self.current()
         path = os.path.dirname(x.local_path) if x and x.local_path else self.app.cfg.download_dir
@@ -187,6 +198,7 @@ class TransfersPane(Vertical):
 
     def on_mount(self) -> None:
         self._states: dict[tuple, str] | None = None  # None until the first refresh
+        self._fallback_tried: set[str] = set()
         self._finished_batch = 0
         self.set_interval(0.5, self.refresh_data)
         self.refresh_data()
@@ -206,10 +218,17 @@ class TransfersPane(Vertical):
         """Toast finished/failed downloads; ring the bell once when the queue empties."""
         states = {x.key: x.state for x in downs}
         prev, self._states = self._states, states
-        if prev is None or not self.app.cfg.notify_downloads:
+        if prev is None:
             return  # don't announce transfers restored from the last session
         done = [x for x in downs if x.state == "done" and prev.get(x.key) != "done"]
         failed = [x for x in downs if x.state == "failed" and prev.get(x.key) != "failed"]
+        if self.app.cfg.auto_fallback:
+            for x in failed:
+                if norm_name(x.path) not in self._fallback_tried:  # one automatic hop per track
+                    self._fallback_tried.add(norm_name(x.path))
+                    self.app.find_alternative(x, auto=True)
+        if not self.app.cfg.notify_downloads:
+            return
         self._finished_batch += len(done)
         if len(done) == 1:
             self.app.notify(basename(done[0].path), title="✔ Downloaded", timeout=4)

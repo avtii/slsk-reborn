@@ -1,6 +1,7 @@
 """The Textual application shell: top status bar, five tabs, footer."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -12,15 +13,18 @@ from textual.widgets import Footer, Static, TabbedContent, TabPane
 
 from . import __version__
 from .config import Config
-from .engine import Bus, Engine, FileEntry, SlskEngine
+from .engine import Bus, Engine, FileEntry, SlskEngine, Xfer
+from .fallback import alt_query, good_enough, pick_alternative
 from .panes import BrowsePane, ChatPane, SearchPane, SharesPane, TransfersPane
 from .player import Player, album_queue
 from .playerbar import PlayerBar
 from .screens import HelpScreen, LoginScreen, RoomListScreen, UserInfoScreen, WelcomeScreen
 from .theme import THEMES, mini_logo
-from .util import human_speed
+from .util import basename, human_speed
 
 log = logging.getLogger("slsk_reborn")
+
+ALT_WAIT = 12.0  # seconds of search results to collect when looking for another source
 
 TABS = [("search", "⌕ Search"), ("transfers", "⇅ Transfers"), ("browse", "◉ Browse"),
         ("chat", "✉ Chat"), ("shares", "▣ Shares")]
@@ -101,6 +105,7 @@ class SlskApp(App):
         self.bus = Bus()
         self.engine: Engine = self._make_engine()
         self.player = Player()
+        self._alt_running: set[tuple] = set()
         self.player.set_volume(cfg.volume)
 
     def _make_engine(self) -> Engine:
@@ -328,6 +333,57 @@ class SlskApp(App):
             self.notify(f"Folder download failed: {type(e).__name__} {e}", severity="error")
             return
         self.notify(f"{n} files from {user}", title="▼ folder queued")
+
+    def find_alternative(self, x: Xfer, auto: bool = False) -> None:
+        """Look for the same file at another user; queue the best copy and drop this one."""
+        if x.key in self._alt_running:
+            return
+        self._alt_running.add(x.key)
+        self._alternative(x, auto)
+
+    @work
+    async def _alternative(self, x: Xfer, auto: bool) -> None:
+        name = basename(x.path)
+        try:
+            q = alt_query(x.path)
+            if not q:
+                self.notify(f"Can't build a search from “{name}”", severity="warning")
+                return
+            if not auto:
+                self.notify(f"Searching for “{q}”…", title="↻ other source")
+            found: list = []
+
+            def collect(ticket: int, hits: list) -> None:
+                if ticket == tk:
+                    found.extend(hits)
+
+            tk = None
+            self.bus.on("search.hits", collect)
+            try:
+                tk = await self.engine.search(q)
+                for _ in range(int(ALT_WAIT / 0.5)):
+                    await asyncio.sleep(0.5)
+                    if good_enough(x, found):
+                        break
+            finally:
+                self.bus.off("search.hits", collect)
+                if tk is not None:
+                    self.engine.stop_search(tk)
+            h = pick_alternative(x, found)
+            if h is None:
+                self.notify(f"{name}: no other copy found ({len(found)} results)",
+                            title="↻ other source", severity="warning", timeout=6)
+                return
+            await self.engine.download(h.user, h.path, h.size)
+            if x.active:
+                await self.engine.abort(x.key)
+            await self.engine.remove(x.key)
+            note = "free slot" if h.free_slot else f"queue {h.queue}"
+            self.notify(f"{name}\n{x.user} → {h.user} ({note})", title="↻ switched source", timeout=6)
+        except Exception as e:
+            self.notify(f"Other source failed: {type(e).__name__} {e}", severity="warning")
+        finally:
+            self._alt_running.discard(x.key)
 
     def browse_user(self, user: str, focus_path: str | None = None) -> None:
         self.action_tab("browse")

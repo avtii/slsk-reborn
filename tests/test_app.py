@@ -338,3 +338,31 @@ async def test_album_view(cfg):
         await pilot.press("a")
         assert not view.albums_mode and view.table.row_count == 4
         assert isinstance(full, Album)
+
+
+async def test_failed_download_switches_source(cfg, monkeypatch):
+    import slsk_reborn.app as appmod
+    monkeypatch.setattr(appmod, "ALT_WAIT", 2.0)
+    path = "@@x/Music/Burial/Untrue/03 - Near Dark.mp3"
+    app = SlskApp(cfg, demo=True)
+    async with app.run_test(size=(160, 45)) as pilot:
+        await _wait(pilot, lambda: app.engine.connected)
+        eng = app.engine
+
+        async def fake_search(q):
+            assert q == "near dark"
+            async def later():
+                await asyncio.sleep(0.3)
+                eng.bus.emit("search.hits", ticket=77, hits=[
+                    Hit("slowpoke", "@@q/" + path[4:], 9_000_000, "mp3", 320, 200, 44100, False, 30, 10),
+                    Hit("quick", "@@r/Untrue/03 - Near Dark.mp3", 9_000_000, "mp3", 320, 200, 44100, True, 0, 10)])
+            asyncio.get_running_loop().create_task(later())
+            return 77
+        eng.search = fake_search
+        await eng.download("lowpass", path, 9_000_000)
+        await pilot.press("2")
+        await pilot.pause(0.8)                      # transfers pane has seen it queued
+        eng._xfers[("lowpass", path, 0)].state = "failed"
+        await _wait(pilot, lambda: any(t.user == "quick" for t in eng.transfers()), timeout=10)
+        assert not any(t.user == "lowpass" for t in eng.transfers())
+        assert 77 in eng._stopped

@@ -4,6 +4,8 @@ from __future__ import annotations
 import itertools
 import re
 import time
+from collections import Counter
+from dataclasses import dataclass, field
 
 from rich.text import Text
 from textual import on, work
@@ -13,8 +15,8 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Checkbox, DataTable, Input, Static, TabbedContent, TabPane
 
 from ..engine import Hit
-from ..util import (LOSSLESS, basename, human_duration, human_size, human_speed, quality_text,
-                    short_dir, user_color)
+from ..util import (LOSSLESS, basename, dirname, human_duration, human_size, human_speed, quality_text,
+                    short_dir, split_path, user_color)
 
 SORTS = ["arrival", "quality", "speed", "size", "user"]
 _ids = itertools.count(1)
@@ -47,6 +49,64 @@ def matches(h: Hit, flt: str) -> bool:
     return True
 
 
+TRACK_NO = re.compile(r"^\s*(?:\d-)?(\d{1,2})(?=\D)")  # "07 - x", "1-07 x", "07. x"
+
+
+@dataclass
+class Album:
+    """Search hits grouped by user + folder."""
+    idx: int
+    user: str
+    folder: str
+    hits: list[int] = field(default_factory=list)
+    size: int = 0
+    duration: int = 0
+    numbers: set[int] = field(default_factory=set)
+    exts: Counter = field(default_factory=Counter)
+    min_bitrate: int = 0
+    free_slot: bool = False
+    speed: int = 0
+    queue: int = 0
+    locked: int = 0
+
+    def add(self, i: int, h: Hit) -> None:
+        self.hits.append(i)
+        self.size += h.size
+        self.duration += h.duration or 0
+        self.exts[h.ext] += 1
+        if h.ext not in LOSSLESS and h.bitrate:
+            self.min_bitrate = min(self.min_bitrate or h.bitrate, h.bitrate)
+        if (m := TRACK_NO.match(basename(h.path))) and 0 < int(m.group(1)) < 100:
+            self.numbers.add(int(m.group(1)))
+        self.free_slot, self.speed, self.queue = h.free_slot, h.speed, h.queue
+        self.locked += h.locked
+
+    @property
+    def lossless(self) -> bool:
+        return all(e in LOSSLESS for e in self.exts)
+
+    def quality(self) -> Text:
+        ext = self.exts.most_common(1)[0][0]
+        return quality_text(ext, None if self.lossless else (self.min_bitrate or None))
+
+    def tracks(self) -> Text:
+        """Track count; a check when the track numbers run 1..n with no gaps, n/m when some are missing."""
+        top = max(self.numbers, default=0)
+        if top >= 2 and self.numbers == set(range(1, top + 1)):
+            return Text(f"{len(self.hits)} ✔", "bold #39ff88")
+        if top > len(self.numbers):
+            return Text(f"{len(self.numbers)}/{top}", "#ffd23f")
+        return Text(str(len(self.hits)))
+
+
+FILE_COLS = [(" ", "slot", 2), ("User", "user", 16), ("Speed", "speed", 9), ("Q", "queue", 4),
+             ("Folder", "folder", 34), ("File", "file", 48), ("Size", "size", 7), ("Quality", "quality", 10),
+             ("Len", "len", 6)]
+ALBUM_COLS = [(" ", "slot", 2), ("User", "user", 16), ("Speed", "speed", 9), ("Q", "queue", 4),
+              ("Album folder", "file", 48), ("Tracks", "tracks", 7), ("Size", "size", 8),
+              ("Quality", "quality", 10), ("Len", "len", 8)]
+
+
 class IdxText(Text):
     """Row's first cell; carries the hit index so DataTable.sort can sort in place."""
 
@@ -65,6 +125,7 @@ class ResultsView(Vertical):
     BINDINGS = [
         Binding("d", "download", "Download"),
         Binding("f", "download_folder", "Folder"),
+        Binding("a", "toggle_albums", "Albums"),
         Binding("b", "browse", "Browse user"),
         Binding("i", "info", "User info"),
         Binding("m", "message", "Message"),
@@ -87,6 +148,10 @@ class ResultsView(Vertical):
         self._dirty_sort = False
         self._last_sort = 0.0
         self._refilter_timer = None
+        self.albums_mode = False
+        self.albums: dict[tuple[str, str], Album] = {}
+        self.album_list: list[Album] = []
+        self._album_rows: set[int] = set()
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="filter-row"):
@@ -98,26 +163,28 @@ class ResultsView(Vertical):
         yield Static(classes="summary")
 
     def on_mount(self) -> None:
-        self.table = t = self.query_one(DataTable)
-        t.add_column(" ", key="slot", width=2)
-        t.add_column("User", key="user", width=16)
-        t.add_column("Speed", key="speed", width=9)
-        t.add_column("Q", key="queue", width=4)
-        t.add_column("Folder", key="folder", width=34)
-        t.add_column("File", key="file", width=48)
-        t.add_column("Size", key="size", width=7)
-        t.add_column("Quality", key="quality", width=10)
-        t.add_column("Len", key="len", width=6)
+        self.table = self.query_one(DataTable)
+        self.albums_mode = bool(getattr(self.app.cfg, "album_view", False))
+        self._add_columns()
         self.summary = self.query_one(".summary", Static)
         self.set_interval(FLUSH_EVERY, self.flush)
         self.update_summary()
+
+    @property
+    def cols(self):
+        return ALBUM_COLS if self.albums_mode else FILE_COLS
+
+    def _add_columns(self) -> None:
+        for label, key, width in self.cols:
+            self.table.add_column(label, key=key, width=width)
 
     def on_resize(self) -> None:
         # File column takes what the fixed columns leave over; a fixed width means
         # adding rows never re-measures the whole table
         from textual.widgets.data_table import ColumnKey
         col = self.table.columns.get(ColumnKey("file"))
-        w = max(20, self.size.width - (2 + 16 + 9 + 4 + 34 + 7 + 10 + 6 + 9 * 2 + 2))
+        fixed = sum(w for _, k, w in self.cols if k != "file") + 2 * len(self.cols) + 2
+        w = max(20, self.size.width - fixed)
         if col is not None and col.width != w:
             col.width = w
             col.auto_width = False
@@ -140,10 +207,24 @@ class ResultsView(Vertical):
             self.users.update(h.user for h in new)
             t = self.table
             added = False
+            touched: dict[int, Album] = {}
             for i, h in enumerate(new, start):
-                if self._visible(h):
+                if not self._visible(h):
+                    continue
+                if self.albums_mode:
+                    a = self._album_add(i, h)
+                    touched[a.idx] = a
+                else:
                     t.add_row(*self._cells(i, h), key=str(i))
                     added = True
+            for a in touched.values():
+                if a.idx in self._album_rows:
+                    for (_, col, _), v in zip(ALBUM_COLS, self._album_cells(a)):
+                        t.update_cell(f"a{a.idx}", col, v)
+                else:
+                    t.add_row(*self._album_cells(a), key=f"a{a.idx}")
+                    self._album_rows.add(a.idx)
+                added = True
             if added and self.sort != "arrival":
                 self._dirty_sort = True
             self.update_summary()
@@ -180,7 +261,35 @@ class ResultsView(Vertical):
                 Text(lock + basename(h.path), "bold" if not h.locked else "dim strike"),
                 human_size(h.size), quality_text(h.ext, h.bitrate), human_duration(h.duration))
 
+    def _album_add(self, i: int, h: Hit) -> Album:
+        key = (h.user, dirname(h.path))
+        if (a := self.albums.get(key)) is None:
+            a = self.albums[key] = Album(len(self.album_list), *key)
+            self.album_list.append(a)
+        a.add(i, h)
+        return a
+
+    def _album_cells(self, a: Album):
+        slot = IdxText(a.idx, "●", "bold #39ff88" if a.free_slot else "#ff4d6d")
+        name = Text("🔒 " if a.locked == len(a.hits) else "")
+        parts = split_path(a.folder)
+        if len(parts) > 1:
+            name.append(parts[-2] + "/", "dim")
+        name.append(parts[-1] if parts else a.folder, "bold")
+        return (slot, Text(a.user, user_color(a.user)), Text(human_speed(a.speed), "#7ab8ff"),
+                Text(str(a.queue), "dim" if a.queue else "#39ff88"), name, a.tracks(),
+                human_size(a.size), a.quality(), human_duration(a.duration))
+
     def _sort_key(self):
+        if self.albums_mode:
+            A = self.album_list
+            return {
+                "quality": lambda i: -((5000 if A[i].lossless else 0) + A[i].min_bitrate),
+                "speed": lambda i: -(A[i].speed + (10**9 if A[i].free_slot else 0)),
+                "size": lambda i: -A[i].size,
+                "user": lambda i: (A[i].user.lower(), A[i].folder),
+                "arrival": lambda i: i,
+            }[self.sort]
         H = self.hits
         return {
             "quality": lambda i: -((5000 if H[i].ext in LOSSLESS else 0) + (H[i].bitrate or 0)),
@@ -209,8 +318,19 @@ class ResultsView(Vertical):
     def rebuild(self) -> None:
         """Full redraw; only needed when the filter changes (sorting is in place)."""
         t = self.table
-        idx = sorted(range(len(self.hits)), key=self._sort_key())
         t.clear()
+        if self.albums_mode:
+            self.albums, self.album_list, self._album_rows = {}, [], set()
+            for i, h in enumerate(self.hits):
+                if self._visible(h):
+                    self._album_add(i, h)
+            for j in sorted(range(len(self.album_list)), key=self._sort_key()):
+                t.add_row(*self._album_cells(self.album_list[j]), key=f"a{j}")
+                self._album_rows.add(j)
+            self._dirty_sort = False
+            self.update_summary()
+            return
+        idx = sorted(range(len(self.hits)), key=self._sort_key())
         for i in idx:
             h = self.hits[i]
             if self._visible(h):
@@ -227,9 +347,13 @@ class ResultsView(Vertical):
             s.append(f"  ■ {self.stop_reason}", "bold #ff8c42")
         s.append(f"  {len(self.hits):,} files", "bold #00e5ff")
         s.append(f" from {len(self.users):,} users", "#b388ff")
-        s.append(f"   showing {self.table.row_count:,}", "dim")
+        unit = " albums" if self.albums_mode else ""
+        s.append(f"   showing {self.table.row_count:,}{unit}", "dim")
         s.append(f"   sort: {self.sort}", "#ffd23f")
-        s.append("   enter download · f folder · s sort · x stop", "dim")
+        if self.albums_mode:
+            s.append("   enter download album · a files · s sort · x stop", "dim")
+        else:
+            s.append("   enter download · f folder · a albums · s sort · x stop", "dim")
         self.summary.update(s)
 
     # ------------------------------------------------------------------ filter
@@ -253,10 +377,13 @@ class ResultsView(Vertical):
         self.table.focus()
 
     def current(self) -> Hit | None:
-        t = self.query_one(DataTable)
+        """The hit under the cursor (an album row gives its first file)."""
+        t = self.table
         if not t.row_count:
             return None
         k = t.coordinate_to_cell_key(t.cursor_coordinate).row_key.value
+        if k.startswith("a"):
+            return self.hits[self.album_list[int(k[1:])].hits[0]]
         return self.hits[int(k)]
 
     @on(DataTable.RowSelected)
@@ -264,6 +391,8 @@ class ResultsView(Vertical):
         self.action_download()
 
     def action_download(self) -> None:
+        if self.albums_mode:
+            return self.action_download_folder()
         if (h := self.current()):
             if h.locked:
                 self.notify("That file is locked (shared to buddies only).", severity="warning")
@@ -272,8 +401,7 @@ class ResultsView(Vertical):
 
     def action_download_folder(self) -> None:
         if (h := self.current()):
-            folder = h.path[:max(h.path.rfind("\\"), h.path.rfind("/"))]
-            self.app.start_folder_download(h.user, folder)
+            self.app.start_folder_download(h.user, dirname(h.path))
 
     def action_browse(self) -> None:
         if (h := self.current()):
@@ -286,6 +414,15 @@ class ResultsView(Vertical):
     def action_message(self) -> None:
         if (h := self.current()):
             self.app.open_pm(h.user)
+
+    def action_toggle_albums(self) -> None:
+        self.albums_mode = not self.albums_mode
+        self.app.cfg.album_view = self.albums_mode
+        self.app.cfg.save()
+        self.table.clear(columns=True)
+        self._add_columns()
+        self.on_resize()
+        self.rebuild()
 
     def action_cycle_sort(self) -> None:
         self.sort = SORTS[(SORTS.index(self.sort) + 1) % len(SORTS)]

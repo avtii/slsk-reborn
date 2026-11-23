@@ -299,3 +299,42 @@ def test_player_queue_advances(tmp_path, monkeypatch):
         time.sleep(0.05)
     assert p.state == "stopped"
     p.close()
+
+
+async def test_album_view(cfg):
+    from slsk_reborn.panes.search import Album
+    app = SlskApp(cfg, demo=True)
+    async with app.run_test(size=(160, 45)) as pilot:
+        await _wait(pilot, lambda: app.engine.connected)
+        await pilot.press(*"zzqq", "enter")
+        await _wait(pilot, lambda: app.query(ResultsView))
+        view = app.query_one(ResultsView)
+        await _wait(pilot, lambda: view.ticket is not None)
+        root = "@@s/Music/"
+        hits = ([Hit("ann", f"{root}Full/{n:02d} - song.flac", 30_000_000, "flac", None, 240, 44100, True, 0, 9000)
+                 for n in (1, 2, 3, 4)]
+                + [Hit("bob", f"{root}Gappy/{n:02d} song.mp3", 8_000_000, "mp3", b, 200, 44100, False, 3, 100)
+                   for n, b in ((1, 320), (2, 192), (5, 320))])
+        view.table.focus()
+        await pilot.press("a")
+        assert view.albums_mode and app.cfg.album_view
+        view.add_hits(hits)
+        await _wait(pilot, lambda: view.table.row_count == 2)
+        full, gappy = view.album_list
+        assert str(full.tracks()) == "4 ✔" and full.lossless and full.size == 120_000_000
+        assert str(gappy.tracks()) == "3/5" and gappy.min_bitrate == 192
+        # more files for an album update its row instead of adding one
+        view.add_hits([Hit("bob", f"{root}Gappy/03 song.mp3", 1, "mp3", 320)])
+        await _wait(pilot, lambda: len(gappy.hits) == 4)
+        assert view.table.row_count == 2
+        await pilot.press("s")  # quality: lossless album first
+        assert view.current().user == "ann"
+        # filter regroups only the visible files
+        view.query_one(".flt").value = "flac"
+        await _wait(pilot, lambda: view.table.row_count == 1)
+        view.table.focus()
+        await pilot.press("enter")  # downloads the whole folder
+        await _wait(pilot, lambda: app.engine.transfers())
+        await pilot.press("a")
+        assert not view.albums_mode and view.table.row_count == 4
+        assert isinstance(full, Album)

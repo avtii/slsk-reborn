@@ -199,11 +199,13 @@ HELP = """\
   [b]enter / d[/]    download file       [b]f[/]  download the whole folder
   [b]b[/]            browse user         [b]i[/]  user info       [b]m[/]  message user
   [b]s[/]            cycle sort          [b]x[/]  stop search   [b]ctrl+w[/]  close tab
+  [b]a[/]            album view: one row per folder with track count, size, quality;
+                 [b]✔[/] = track numbers complete, [b]9/12[/] = some missing; enter downloads it
   Filter box: words to include, [b]-word[/] to exclude, [b]flac[/] / [b]mp3[/] / [b]>256[/] for quality.
 
 [b $primary]Player[/]  (MP3, FLAC, WAV, OGG built in; other formats via mpv or ffplay if installed)
   [b]enter[/] on a finished download plays it, the rest of its folder follows
-  [b]space[/] play/pause   [b][ ][/] seek ∓10s   [b]- +[/] volume   [b]< >[/] prev/next   [b]\[/] stop
+  [b]space[/] play/pause   [b][ ][/] seek ∓10s   [b]- +[/] volume   [b]< >[/] prev/next   [b]\\ [/]stop
 
 [b $primary]Transfers[/]
   [b]enter[/] play   [b]p[/] pause   [b]r[/] resume/retry   [b]x[/] abort   [b]del[/] remove   [b]c[/] clear finished

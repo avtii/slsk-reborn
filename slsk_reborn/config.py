@@ -29,6 +29,7 @@ class Config:
     theme: str = "slsk-neon"
     welcomed: bool = False  # first-run sharing/ports notes were shown
     volume: float = 0.8
+    album_view: bool = False  # search results grouped by folder
     notify_downloads: bool = True  # toast per finished file, bell when the queue empties
     friends: list[str] = field(default_factory=list)
     blocked: list[str] = field(default_factory=list)

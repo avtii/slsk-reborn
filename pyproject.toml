@@ -1,6 +1,6 @@
 [project]
 name = "slsk-reborn"
-version = "0.3.2"
+version = "0.3.3"
 description = "A modern, good-looking terminal Soulseek client: search, download, share, browse and chat."
 readme = "README.md"
 license = "MIT"

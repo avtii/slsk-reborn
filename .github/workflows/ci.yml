@@ -24,3 +24,4 @@ jobs:
           pip install ".[dev]"
       - name: Tests
         run: pytest -q
+        timeout-minutes: 10

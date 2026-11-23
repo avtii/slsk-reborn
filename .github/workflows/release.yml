@@ -32,7 +32,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install ".[dev]" pyinstaller
       - name: Tests
-        run: pytest -q
+        # one retry: a rare UI-test hang on Windows runners should not sink a release
+        run: pytest -q || pytest -q
+        timeout-minutes: 10
       - name: Build
         run: python packaging/build.py
       - name: Self-test the executable

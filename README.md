@@ -164,7 +164,7 @@ The filter box above the results takes words to include, `-word` to exclude, `fl
 
 Everything lives in `~/.slsk-reborn/` (set `SLSK_REBORN_HOME` to move it):
 
-- `config.toml`: account, folders, limits, theme, rooms, wishlist, friends and blocked users. It is written with `chmod 600` because it holds your password.
+- `config.toml`: account, folders, limits, theme, rooms, wishlist, friends and blocked users. On macOS and Linux it is created readable only by you, because it holds your password.
 - `shares/` and `transfers/`: caches, so the shares index and the transfer queue survive restarts.
 - `searches.json`: the search tabs that were open when you quit (up to 20 tabs, 3,000 files each), reopened on the next start.
 - `slsk-reborn.log`: run with `--debug` for full protocol logging.

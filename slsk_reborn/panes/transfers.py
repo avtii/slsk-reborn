@@ -129,18 +129,31 @@ class TransferTable(DataTable):
             try:
                 await getattr(self.app.engine, op)(x.key)
             except Exception as e:
-                self.notify(f"{op} failed: {e}", severity="warning")
+                # aioslsk's InvalidStateTransition carries the whole Transfer repr; keep it out of the UI
+                why = "not possible in this state" if "state transition" in str(e) else str(e)[:80]
+                self.notify(f"{basename(x.path)}\n{op} {x.state}: {why}", title=f"Can't {op}",
+                            severity="warning")
+
+    def _guard(self, x: Xfer, op: str, ok: bool, why: str) -> bool:
+        if not ok:
+            self.notify(f"{basename(x.path)}\n{why}", title=f"Can't {op}", severity="warning", timeout=4)
+        return ok
 
     def action_pause(self):
-        if (x := self.current()):
+        if (x := self.current()) and self._guard(
+                x, "pause", x.active, f"it is {x.state}; only queued or running transfers pause"):
             self._do("pause", [x])
 
     def action_resume(self):
-        if (x := self.current()):
+        if (x := self.current()) and self._guard(
+                x, "resume", not x.upload, "uploads restart when the other user asks again") and self._guard(
+                x, "resume", x.state in ("paused", "failed", "aborted", "incomplete"),
+                f"it is {x.state}" if x.state != "done" else "it is already done"):
             self._do("resume", [x])
 
     def action_abort(self):
-        if (x := self.current()):
+        if (x := self.current()) and self._guard(
+                x, "abort", x.active or x.state == "paused", f"it is already {x.state}"):
             self._do("abort", [x])
 
     def action_remove(self):

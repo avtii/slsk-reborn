@@ -459,3 +459,31 @@ async def test_tracklist_import(cfg, tmp_path, monkeypatch):
         assert "archangel" in view.rows[0].hit.path.lower()
         await pilot.press("ctrl+w")
         await _wait(pilot, lambda: not app.query(TracklistView))
+
+
+async def test_pause_finished_upload_is_refused_politely(cfg):
+    from slsk_reborn.engine import Xfer
+    from slsk_reborn.panes.transfers import TransferTable
+    app = SlskApp(cfg, demo=True)
+    async with app.run_test(size=(160, 45)) as pilot:
+        await _wait(pilot, lambda: app.engine.connected)
+        eng = app.engine
+        key = ("peer", "@@x\a.mp3", 1)
+        eng._xfers[key] = Xfer(key, True, "peer", "@@x\a.mp3", "done", 5_000_000, 5_000_000)
+        calls = []
+
+        async def no_call(k):
+            calls.append(k)
+        eng.pause = eng.resume = eng.abort = no_call
+        await pilot.press("2")
+        ups = app.query_one("#uploads", TransferTable)
+        await _wait(pilot, lambda: ups.row_count > 0)
+        ups.focus()
+        for k in "prx":
+            await pilot.press(k)
+        await pilot.pause(0.3)
+        assert calls == []
+        notes = [str(n.message) for n in app._notifications]
+        assert any("only queued or running" in n for n in notes)
+        assert any("other user asks again" in n for n in notes)
+        assert not any("Transfer(" in n for n in notes)

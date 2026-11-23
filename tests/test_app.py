@@ -270,6 +270,18 @@ async def test_player(cfg, tmp_path, monkeypatch):
         assert p.state == "playing"
         await pilot.press("right_square_bracket")
         assert p.position >= 10
+        text = str(bar.bar_text(150))
+        assert "← → seek" in text and "− vol" in text and text.rstrip().endswith("+   2/3")
+        before = p.position
+        await pilot.press("right")                 # arrows seek while playing
+        assert p.position >= before + 9
+        await pilot.press("left")
+        assert abs(p.position - before) < 2
+        app.query_one("#search-input").focus()     # ...but move the cursor in a text box
+        before = p.position
+        await pilot.press("left")
+        assert p.position >= before - 1
+        app.set_focus(None)
         await pilot.press("minus", "minus")
         assert abs(p.volume - 0.6) < 0.01
         await pilot.press("greater_than_sign")

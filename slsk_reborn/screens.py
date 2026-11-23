@@ -369,7 +369,8 @@ HELP = """\
 
 [b $primary]Player[/]  (MP3, FLAC, WAV, OGG built in; other formats via mpv or ffplay if installed)
   [b]enter[/] on a finished download plays it, the rest of its folder follows
-  [b]space[/] play/pause   [b][ ][/] seek ∓10s   [b]- +[/] volume   [b]< >[/] prev/next   [b]\\ [/]stop
+  [b]space[/] play/pause   [b]← →[/] or [b][ ][/] seek ∓10s ([b]shift+← →[/] ∓1 min)   [b]- +[/] volume
+  [b]< >[/] prev/next   [b]\\ [/]stop   (arrows seek only while something plays)
 
 [b $primary]Transfers[/]
   [b]enter[/] play   [b]p[/] pause   [b]r[/] resume/retry   [b]x[/] abort   [b]del[/] remove   [b]c[/] clear finished

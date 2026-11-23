@@ -52,10 +52,14 @@ class PlayerBar(Static):
         tail.append(f"  {clock(pos)}", "bold #00e5ff")
         if dur:
             tail.append(f" / {clock(dur)}", "dim")
+        tail.append("   ← →", "bold #00e5ff")
+        tail.append(" seek", "dim")
         vol = int(round(p.volume * 10))
-        tail.append("   vol ", "dim")
+        tail.append("   − ", "bold #ff2bd6")
+        tail.append("vol ", "dim")
         tail.append("▮" * vol, "#ff2bd6")
         tail.append("▯" * (10 - vol), "dim")
+        tail.append(" +", "bold #ff2bd6")
         if len(p.queue) > 1:
             tail.append(f"   {p.index + 1}/{len(p.queue)}", "#b388ff")
         if not p.native:

@@ -11,7 +11,7 @@ A Soulseek client for the terminal, built on [Textual](https://textual.textualiz
 - **Tracklists**: paste a list of `Artist - Title` lines (numbers and timestamps are fine) with `ctrl+o` or the **♫ Tracklist** button. Each track is searched, the best copy is picked (right artist and title, no unasked-for remix, best quality, free slot) and queued, and the ♫ tab follows every download. It reads the `tracklist.txt` that [mixgrab](https://github.com/avtii/mixgrab) writes for a YouTube mix: `slsk-reborn --tracklist tracklist.txt`.
 - **Transfers**: downloads and uploads update live with progress bars, speed, ETA and queue place. Keys pause, resume or retry, abort, remove, clear finished transfers and open the folder. Downloads keep the album folder structure. A notification (and terminal bell) says when downloads finish.
 - **Another source**: when a download fails, the same file is looked up at other users (same size, or the same name and nearly the same size) and the best one is queued instead. This happens once by itself; `n` does it by hand, for example when a download is stuck far back in a queue.
-- **Player**: enter on a finished download plays it, and the rest of its folder follows. MP3, FLAC, WAV and OGG play built in; other formats play through mpv or ffplay if one is installed. `space` pauses, `[` `]` seek, `-` `+` change the volume, `<` `>` skip.
+- **Player**: enter on a finished download plays it, and the rest of its folder follows. MP3, FLAC, WAV and OGG play built in; other formats play through mpv or ffplay if one is installed. `space` pauses, `←` `→` (or `[` `]`) seek 10 seconds, `shift+←` `shift+→` a minute, `-` `+` change the volume, `<` `>` skip. The arrows seek only while something is playing; otherwise they work as usual.
 - **Wishlist, friends, blocked users** (`ctrl+l`): wishlist searches are re-run by the server every few minutes and new results open in a ★ tab (`w` adds the current search). Blocked users can't message you, see your searches, browse you or download from you, and their results are hidden. Friend or block anyone from their user card (`i`).
 - **Browse**: opens another user's shares as a folder tree with a file list. Press `d` on a folder to download it and everything below it.
 - **Chat**: rooms with a user list, private messages, unread badges, highlights when someone mentions your name, and `/join` `/leave` `/msg` `/rooms` `/clear`.
@@ -140,7 +140,7 @@ On the first start a login box opens. A Soulseek account is created automaticall
 | | `ctrl+t` | cycle theme |
 | | `ctrl+l` | wishlist, friends, blocked users |
 | | `ctrl+o` | download a tracklist |
-| | `space` `[` `]` `-` `+` `<` `>` | player: pause, seek, volume, prev/next |
+| | `space` `←` `→` `-` `+` `<` `>` | player: pause, seek (also `[` `]`; shift = 1 min), volume, prev/next |
 | | `ctrl+q` | quit (saves transfers) |
 | search results | `enter` / `d` | download file |
 | | `f` | download whole folder |

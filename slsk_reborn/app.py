@@ -7,6 +7,7 @@ import time
 
 from rich.text import Text
 from textual import work
+from textual.actions import SkipAction
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Static, TabbedContent, TabPane
@@ -86,6 +87,11 @@ class SlskApp(App):
         Binding("escape", "unfocus", "Leave input", show=False),
         # player
         Binding("space", "play_pause", "Play/Pause", show=False),
+        # arrows (and keypad arrows) seek while something plays; otherwise they pass through
+        Binding("left", "arrow_seek(-10)", "-10s", show=False, priority=True),
+        Binding("right", "arrow_seek(10)", "+10s", show=False, priority=True),
+        Binding("shift+left", "arrow_seek(-60)", "-1m", show=False, priority=True),
+        Binding("shift+right", "arrow_seek(60)", "+1m", show=False, priority=True),
         Binding("left_square_bracket", "seek(-10)", "-10s", show=False),
         Binding("right_square_bracket", "seek(10)", "+10s", show=False),
         Binding("minus", "volume(-0.1)", "Vol -", show=False),
@@ -291,6 +297,14 @@ class SlskApp(App):
 
     def action_seek(self, delta: float) -> None:
         self.player.seek_by(delta)
+        self.query_one(PlayerBar).tick()
+
+    def action_arrow_seek(self, delta: float) -> None:
+        from textual.widgets import Input, TextArea
+        if (not self.player.queue or self.player.state not in ("playing", "paused")
+                or isinstance(self.focused, (Input, TextArea)) or len(self.screen_stack) > 1):
+            raise SkipAction()  # the key goes to the focused widget as usual
+        self.action_seek(delta)
 
     def action_volume(self, delta: float) -> None:
         self.player.set_volume(self.player.volume + delta)

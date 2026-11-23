@@ -220,7 +220,7 @@ class SlskEngine(Engine):
         from aioslsk.client import SoulSeekClient
         from aioslsk.events import (PrivateMessageEvent, RoomJoinedEvent, RoomLeftEvent,
                                     RoomMessageEvent, ScanCompleteEvent, SearchRequestReceivedEvent,
-                                    SearchResultEvent, ServerReconnectedEvent,
+                                    SearchResultEvent,
                                     SessionDestroyedEvent, SessionInitializedEvent)
         from aioslsk.naming import (DefaultNamingStrategy, KeepDirectoryStrategy,
                                     NumberDuplicateStrategy)
@@ -247,7 +247,6 @@ class SlskEngine(Engine):
         ev.register(SearchRequestReceivedEvent, self._on_search_received)
         ev.register(SessionInitializedEvent, self._on_session)
         ev.register(SessionDestroyedEvent, self._on_session_lost)
-        ev.register(ServerReconnectedEvent, self._on_reconnected)
 
         self.bus.emit("status", state="connecting", detail="server.slsknet.org:2416")
         await self.client.start()
@@ -271,12 +270,6 @@ class SlskEngine(Engine):
     def _on_session_lost(self, event):
         self.connected = False
         self.bus.emit("status", state="offline", detail="connection lost - reconnecting")
-
-    async def _on_reconnected(self, event):
-        try:
-            await self.client.login()
-        except Exception as e:
-            self.bus.emit("log", msg=f"re-login failed: {e}", level="error")
 
     def _on_search_result(self, event):
         ticket = event.query.ticket

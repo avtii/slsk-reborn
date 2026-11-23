@@ -1,0 +1,34 @@
+[project]
+name = "slsk-reborn"
+version = "0.1.0"
+description = "A modern, good-looking terminal Soulseek client: search, download, share, browse and chat."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["aioslsk>=1.7", "textual>=1.0"]
+keywords = ["soulseek", "p2p", "tui", "textual", "music"]
+classifiers = [
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Communications :: File Sharing",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
+
+[project.scripts]
+slsk-reborn = "slsk_reborn.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["slsk_reborn", "slsk_reborn.panes"]
+
+[tool.setuptools.package-data]
+slsk_reborn = ["*.tcss"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

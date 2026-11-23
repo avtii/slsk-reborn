@@ -1,0 +1,289 @@
+"""The Textual application shell: top status bar, five tabs, footer."""
+from __future__ import annotations
+
+import logging
+import time
+
+from rich.text import Text
+from textual import work
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.widgets import Footer, Static, TabbedContent, TabPane
+
+from . import __version__
+from .config import Config
+from .engine import Bus, Engine, FileEntry, SlskEngine
+from .panes import BrowsePane, ChatPane, SearchPane, SharesPane, TransfersPane
+from .screens import HelpScreen, LoginScreen, RoomListScreen, UserInfoScreen
+from .theme import THEMES, mini_logo
+from .util import human_speed
+
+log = logging.getLogger("slsk_reborn")
+
+TABS = [("search", "⌕ Search"), ("transfers", "⇅ Transfers"), ("browse", "◉ Browse"),
+        ("chat", "✉ Chat"), ("shares", "▣ Shares")]
+
+
+class TopBar(Static):
+    def on_mount(self) -> None:
+        self.state, self.detail = "offline", "not connected"
+        self.files = 0
+        self.app.bus.on("status", self._status)
+        self.app.bus.on("shares.scanned", self._scanned)
+        self.set_interval(0.5, self.redraw)
+        self.redraw()
+
+    def _status(self, state: str, detail: str = "") -> None:
+        self.state, self.detail = state, detail
+        self.redraw()
+
+    def _scanned(self, folders: int, files: int) -> None:
+        self.files = files
+
+    def redraw(self) -> None:
+        app = self.app
+        t = mini_logo()
+        t.append(f" v{__version__}   ", "dim")
+        dot = {"online": ("●", "bold #39ff88"), "connecting": ("◌", "bold #ffd23f")}.get(
+            self.state, ("●", "bold #ff4d6d"))
+        t.append(dot[0] + " ", dot[1])
+        t.append(self.state, dot[1])
+        t.append(f" {self.detail}   ", "#b388ff")
+        d, u = app.engine.speeds()
+        xs = app.engine.transfers()
+        t.append("▼ ", "bold #00e5ff")
+        t.append(f"{human_speed(d):>9}  ", "#00e5ff")
+        t.append("▲ ", "bold #ff2bd6")
+        t.append(f"{human_speed(u):>9}   ", "#ff2bd6")
+        act = sum(x.state == "transferring" for x in xs)
+        t.append(f"⇅ {act} active  ", "bold" if act else "dim")
+        t.append(f"▣ {self.files:,} shared", "#39ff88")
+        t.append(f"   {time.strftime('%H:%M')}", "dim")
+        self.update(t)
+
+
+class SlskApp(App):
+    CSS_PATH = "app.tcss"
+    TITLE = "slsk-reborn"
+    BINDINGS = [
+        Binding("1", "tab('search')", "Search", show=False),
+        Binding("2", "tab('transfers')", "Transfers", show=False),
+        Binding("3", "tab('browse')", "Browse", show=False),
+        Binding("4", "tab('chat')", "Chat", show=False),
+        Binding("5", "tab('shares')", "Shares", show=False),
+        Binding("f2", "tab('search')", "Search", show=False),
+        Binding("f3", "tab('transfers')", "Transfers", show=False),
+        Binding("f4", "tab('browse')", "Browse", show=False),
+        Binding("f5", "tab('chat')", "Chat", show=False),
+        Binding("f6", "tab('shares')", "Shares", show=False),
+        Binding("escape", "unfocus", "Leave input", show=False),
+        Binding("slash,ctrl+f", "new_search", "Search", key_display="/"),
+        Binding("question_mark,f1", "help", "Help", key_display="?"),
+        Binding("ctrl+t", "cycle_theme", "Theme"),
+        Binding("ctrl+q", "quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, cfg: Config, demo: bool = False):
+        super().__init__()
+        self.cfg = cfg
+        self.demo = demo
+        self.bus = Bus()
+        self.engine: Engine = self._make_engine()
+
+    def _make_engine(self) -> Engine:
+        if self.demo:
+            from .demo import DemoEngine
+            return DemoEngine(self.cfg, self.bus)
+        return SlskEngine(self.cfg, self.bus)
+
+    def compose(self) -> ComposeResult:
+        yield TopBar(id="topbar")
+        with TabbedContent(id="main", initial="search"):
+            with TabPane(TABS[0][1], id="search"):
+                yield SearchPane()
+            with TabPane(TABS[1][1], id="transfers"):
+                yield TransfersPane()
+            with TabPane(TABS[2][1], id="browse"):
+                yield BrowsePane()
+            with TabPane(TABS[3][1], id="chat"):
+                yield ChatPane()
+            with TabPane(TABS[4][1], id="shares"):
+                yield SharesPane()
+        yield Footer()
+
+    def on_mount(self) -> None:
+        for th in THEMES:
+            self.register_theme(th)
+        self.theme = self.cfg.theme if self.cfg.theme in {t.name for t in THEMES} else THEMES[0].name
+        self.query_one(SearchPane).focus_input()
+        if self.demo or self.cfg.has_credentials:
+            self.connect()
+        else:
+            self.ask_login()
+
+    # ------------------------------------------------------------------ connection
+    def ask_login(self, error: str = "") -> None:
+        def done(result):
+            if result is None:
+                self.exit()
+                return
+            self.cfg.username, self.cfg.password = result
+            self.engine.username = result[0]
+            self.cfg.save()
+            self.connect()
+
+        self.push_screen(LoginScreen(self.cfg.username, error), done)
+
+    @work(exclusive=True, group="connect")
+    async def connect(self) -> None:
+        try:
+            await self.engine.start()
+        except Exception as e:
+            log.exception("connect failed")
+            await self.engine.stop()
+            self.bus.emit("status", state="offline", detail=str(e)[:60])
+            name = type(e).__name__
+            if name == "AuthenticationError":
+                reason = getattr(e, "reason", "") or "wrong password?"
+                self.engine = self._make_engine()
+                self.ask_login(f"Login refused: {reason}")
+            else:
+                self.notify(f"Could not connect: {name}: {e}", severity="error", timeout=10)
+            return
+        self.notify(f"Logged in as {self.engine.username}", title="● online")
+        self.bus.emit("log", msg=f"logged in as {self.engine.username}", level="info")
+        self.query_one(SharesPane).refresh_table()
+        for room in list(self.cfg.auto_join_rooms):
+            self.query_one(ChatPane).join(room)
+
+    async def action_quit(self) -> None:
+        self.notify("Saving transfers and disconnecting…")
+        await self.engine.stop()
+        self.exit()
+
+    # ------------------------------------------------------------------ navigation
+    def action_tab(self, tab: str) -> None:
+        self.query_one("#main", TabbedContent).active = tab
+        if tab == "chat":
+            self.update_chat_badge()
+
+    def action_unfocus(self) -> None:
+        """Escape leaves a text box so single-key shortcuts work again."""
+        from textual.widgets import DataTable, Input, Tree
+        if isinstance(self.focused, Input):
+            pane = self.query_one("#main", TabbedContent).active_pane
+            target = None
+            if pane is not None:
+                target = pane.query(DataTable).first() if pane.query(DataTable) else (
+                    pane.query(Tree).first() if pane.query(Tree) else None)
+            self.set_focus(target)
+
+    def is_tab_active(self, tab: str) -> bool:
+        return self.query_one("#main", TabbedContent).active == tab
+
+    def action_new_search(self) -> None:
+        self.action_tab("search")
+        self.query_one(SearchPane).focus_input()
+
+    def action_help(self) -> None:
+        self.push_screen(HelpScreen())
+
+    def action_cycle_theme(self) -> None:
+        names = [t.name for t in THEMES]
+        nxt = names[(names.index(self.theme) + 1) % len(names)] if self.theme in names else names[0]
+        self.theme = nxt
+        self.cfg.theme = nxt
+        if not self.demo:
+            self.cfg.save()
+        self.notify(f"Theme: {nxt}")
+
+    def on_tabbed_content_tab_activated(self, e: TabbedContent.TabActivated) -> None:
+        if e.tabbed_content.id == "main" and e.pane.id == "chat":
+            chat = self.query_one(ChatPane)
+            if chat.active:
+                chat.convs[chat.active].bump(0)
+            self.update_chat_badge()
+
+    def update_chat_badge(self) -> None:
+        n = self.query_one(ChatPane).unread_total()
+        try:
+            self.query_one("#main", TabbedContent).get_tab("chat").label = (
+                f"✉ Chat [b reverse] {n} [/]" if n else "✉ Chat")
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ actions used by panes
+    def start_download(self, user: str, path: str, size: int = 0) -> None:
+        self._download(user, path, size)
+
+    @work
+    async def _download(self, user: str, path: str, size: int) -> None:
+        try:
+            await self.engine.download(user, path, size)
+        except Exception as e:
+            self.notify(f"Download failed: {e}", severity="error")
+            return
+        name = path.replace("/", "\\").rsplit("\\", 1)[-1]
+        self.notify(f"{name}\nfrom {user}", title="▼ queued")
+
+    def start_many(self, user: str, files: list[FileEntry]) -> None:
+        self._many(user, files)
+
+    @work
+    async def _many(self, user: str, files: list[FileEntry]) -> None:
+        for f in files:
+            try:
+                await self.engine.download(user, f.path, f.size)
+            except Exception as e:
+                self.notify(f"Queue failed: {e}", severity="error")
+                return
+        self.notify(f"{len(files)} files from {user}", title="▼ folder queued")
+
+    def start_folder_download(self, user: str, folder: str) -> None:
+        self._folder(user, folder)
+
+    @work
+    async def _folder(self, user: str, folder: str) -> None:
+        self.notify(f"Asking {user} for the folder contents…")
+        try:
+            n = await self.engine.download_folder(user, folder)
+        except Exception as e:
+            self.notify(f"Folder download failed: {type(e).__name__} {e}", severity="error")
+            return
+        self.notify(f"{n} files from {user}", title="▼ folder queued")
+
+    def browse_user(self, user: str, focus_path: str | None = None) -> None:
+        self.action_tab("browse")
+        self.query_one(BrowsePane).load(user, focus_path)
+
+    def show_user(self, user: str) -> None:
+        def done(what):
+            if what == "browse":
+                self.browse_user(user)
+            elif what == "message":
+                self.open_pm(user)
+
+        self.push_screen(UserInfoScreen(user), done)
+
+    def open_pm(self, user: str) -> None:
+        self.action_tab("chat")
+        chat = self.query_one(ChatPane)
+        chat.switch("pm", user)
+        chat.query_one("#chat-input").focus()
+
+    def pick_room(self) -> None:
+        def done(room):
+            if room:
+                self.action_tab("chat")
+                self.query_one(ChatPane).join(room)
+
+        self.push_screen(RoomListScreen(), done)
+
+    def remember_room(self, room: str, joined: bool) -> None:
+        rooms = self.cfg.auto_join_rooms
+        if joined and room not in rooms:
+            rooms.append(room)
+        elif not joined and room in rooms:
+            rooms.remove(room)
+        if not self.demo:
+            self.cfg.save()

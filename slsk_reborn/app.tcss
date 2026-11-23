@@ -1,0 +1,410 @@
+/* slsk-reborn — neon terminal look. Colors come from the active theme. */
+
+Screen {
+    background: $background;
+}
+
+#topbar {
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+    color: $foreground;
+}
+
+#main {
+    height: 1fr;
+}
+
+#main > ContentTabs, #search-tabs > ContentTabs {
+    background: $surface;
+}
+
+Tab {
+    color: $foreground 60%;
+}
+
+Tab.-active {
+    color: $primary;
+    text-style: bold;
+}
+
+Underline > .underline--bar {
+    color: $primary;
+    background: $panel;
+}
+
+TabPane {
+    padding: 0;
+}
+
+DataTable {
+    background: $surface;
+    scrollbar-color: $primary 40%;
+    scrollbar-color-hover: $primary;
+    scrollbar-size-vertical: 1;
+}
+
+DataTable > .datatable--header {
+    background: $panel;
+    color: $secondary;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: $primary 35%;
+    text-style: bold;
+}
+
+DataTable:focus > .datatable--cursor {
+    background: $primary 55%;
+}
+
+DataTable > .datatable--even-row {
+    background: $panel 40%;
+}
+
+Input {
+    background: $surface;
+    border: tall $panel;
+}
+
+Input:focus {
+    border: tall $primary;
+}
+
+Button {
+    min-width: 10;
+}
+
+.section-title {
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+    margin-top: 1;
+}
+
+.side-title {
+    height: 1;
+    background: $panel;
+    color: $secondary;
+    text-style: bold;
+}
+
+/* ------------------------------------------------------------- search */
+
+#search-bar {
+    height: 3;
+    padding: 0 1;
+}
+
+#search-icon {
+    width: 3;
+    content-align: center middle;
+    height: 3;
+    color: $primary;
+    text-style: bold;
+}
+
+#search-input {
+    width: 1fr;
+}
+
+#search-empty {
+    height: 1fr;
+    content-align: center middle;
+}
+
+#search-tabs {
+    height: 1fr;
+}
+
+ResultsView {
+    height: 1fr;
+}
+
+.filter-row {
+    height: 3;
+    padding: 0 1;
+}
+
+.filter-row .flt {
+    width: 1fr;
+}
+
+.filter-row Checkbox {
+    background: $surface;
+    border: tall $panel;
+}
+
+.results {
+    height: 1fr;
+}
+
+.summary {
+    height: 1;
+    background: $panel;
+    padding: 0 1;
+}
+
+/* ------------------------------------------------------------- transfers */
+
+TransfersPane TransferTable {
+    height: 1fr;
+    overflow-x: hidden;
+}
+
+#uploads {
+    height: 2fr;
+    max-height: 40%;
+}
+
+#downloads {
+    height: 3fr;
+}
+
+/* ------------------------------------------------------------- browse */
+
+#browse-bar {
+    height: 3;
+    padding: 0 1;
+}
+
+#browse-icon {
+    width: 3;
+    height: 3;
+    content-align: center middle;
+    color: $primary;
+    text-style: bold;
+}
+
+#browse-user {
+    width: 1fr;
+}
+
+#browse-loading {
+    height: 1;
+    color: $primary;
+}
+
+#browse-body {
+    height: 1fr;
+}
+
+#browse-tree {
+    width: 2fr;
+    background: $surface;
+    border-right: vkey $panel;
+    scrollbar-size-vertical: 1;
+}
+
+#browse-files {
+    width: 3fr;
+}
+
+#browse-status {
+    height: 1;
+    background: $panel;
+}
+
+/* ------------------------------------------------------------- chat */
+
+#chat-body {
+    height: 1fr;
+}
+
+#chat-side {
+    width: 26;
+    background: $surface;
+    border-right: vkey $panel;
+}
+
+#chat-list {
+    height: 1fr;
+    background: $surface;
+}
+
+#chat-side Button {
+    width: 100%;
+}
+
+#chat-main {
+    width: 1fr;
+}
+
+#chat-header {
+    height: 1;
+    background: $panel;
+    padding: 0 1;
+}
+
+#chat-logs {
+    height: 1fr;
+}
+
+.chat-log {
+    background: $background;
+    padding: 0 1;
+    scrollbar-size-vertical: 1;
+}
+
+#chat-users-box {
+    width: 22;
+    background: $surface;
+    border-left: vkey $panel;
+}
+
+#chat-users {
+    height: 1fr;
+    background: $surface;
+}
+
+ListView > ListItem.-highlight {
+    background: $primary 40%;
+}
+
+/* ------------------------------------------------------------- shares */
+
+#shares-left {
+    width: 3fr;
+    padding: 0 1;
+}
+
+#shares-right {
+    width: 2fr;
+    padding: 0 1;
+    border-left: vkey $panel;
+}
+
+#shares-table {
+    height: 1fr;
+    min-height: 5;
+}
+
+#shares-add, #shares-buttons {
+    height: 3;
+}
+
+#share-path {
+    width: 1fr;
+}
+
+#activity {
+    height: 1fr;
+    min-height: 4;
+    background: $surface;
+}
+
+#settings-grid {
+    grid-size: 2;
+    grid-columns: 26 1fr;
+    grid-rows: 3;
+    height: auto;
+    margin-top: 1;
+}
+
+#settings-grid Label {
+    height: 3;
+    content-align: left middle;
+    color: $secondary;
+}
+
+#shares-right Checkbox {
+    background: $surface;
+    border: none;
+}
+
+#set-save {
+    margin-top: 1;
+    width: 100%;
+}
+
+#set-note {
+    margin-top: 1;
+}
+
+/* ------------------------------------------------------------- modals */
+
+LoginScreen, UserInfoScreen, RoomListScreen, HelpScreen {
+    align: center middle;
+    background: $background 70%;
+}
+
+#login-box {
+    width: 64;
+    height: auto;
+    padding: 1 3;
+    background: $surface;
+    border: heavy $primary;
+}
+
+#login-logo {
+    width: 100%;
+    content-align: center middle;
+    height: 3;
+}
+
+#login-tag {
+    width: 100%;
+    content-align: center middle;
+    margin-bottom: 1;
+}
+
+#login-hint {
+    margin: 1 0;
+}
+
+#login-buttons, .modal-buttons {
+    height: 3;
+    align: center middle;
+}
+
+#login-buttons Button, .modal-buttons Button {
+    margin: 0 1;
+}
+
+.modal-box {
+    background: $surface;
+    border: heavy $primary;
+    padding: 1 2;
+}
+
+#card-box {
+    width: 70;
+    height: auto;
+    max-height: 80%;
+}
+
+#card-loading {
+    height: 3;
+}
+
+#card-body {
+    margin: 1 0;
+}
+
+#rooms-box {
+    width: 60;
+    height: 80%;
+}
+
+#rooms-loading {
+    height: 1;
+}
+
+#rooms-table {
+    height: 1fr;
+}
+
+#help-box {
+    width: 92;
+    height: 85%;
+}
+
+#help-logo {
+    width: auto;
+    margin-bottom: 1;
+}
+
+Footer {
+    background: $panel;
+}

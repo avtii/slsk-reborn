@@ -18,7 +18,8 @@ from .fallback import alt_query, good_enough, pick_alternative
 from .panes import BrowsePane, ChatPane, SearchPane, SharesPane, TransfersPane
 from .player import Player, album_queue
 from .playerbar import PlayerBar
-from .screens import HelpScreen, ListsScreen, LoginScreen, RoomListScreen, UserInfoScreen, WelcomeScreen
+from .screens import (HelpScreen, ListsScreen, LoginScreen, RoomListScreen, TracklistScreen, UserInfoScreen,
+                      WelcomeScreen)
 from .theme import THEMES, mini_logo
 from .util import basename, human_speed
 
@@ -96,13 +97,15 @@ class SlskApp(App):
         Binding("question_mark,f1", "help", "Help", key_display="?"),
         Binding("ctrl+t", "cycle_theme", "Theme"),
         Binding("ctrl+l", "lists", "Lists"),
+        Binding("ctrl+o", "tracklist", "Tracklist"),
         Binding("ctrl+q", "quit", "Quit", priority=True),
     ]
 
-    def __init__(self, cfg: Config, demo: bool = False):
+    def __init__(self, cfg: Config, demo: bool = False, tracklist: str = ""):
         super().__init__()
         self.cfg = cfg
         self.demo = demo
+        self.tracklist_path = tracklist  # --tracklist FILE: opened once logged in
         self.bus = Bus()
         self.engine: Engine = self._make_engine()
         self.player = Player()
@@ -176,6 +179,18 @@ class SlskApp(App):
         for room in list(self.cfg.auto_join_rooms):
             self.query_one(ChatPane).join(room)
         self.first_run_notes()
+        if self.tracklist_path:
+            path, self.tracklist_path = self.tracklist_path, ""
+            self.action_tracklist(path)
+
+    def action_tracklist(self, path: str = "") -> None:
+        def done(res):
+            if res:
+                tracks, lossless, name = res
+                self.action_tab("search")
+                self.query_one(SearchPane).open_tracklist(tracks, lossless, name)
+
+        self.push_screen(TracklistScreen(path), done)
 
     def first_run_notes(self) -> None:
         """Once: explain sharing and ports. Later: remind if nothing is shared."""

@@ -29,6 +29,8 @@ def build_config(argv: list[str] | None = None) -> tuple[argparse.Namespace, Con
                    help="listening port for peer connections, overrides the config for this run "
                         "(default 61000; N+1 is used for obfuscated connections)")
     p.add_argument("--theme", choices=["slsk-neon", "slsk-amber", "slsk-matrix"])
+    p.add_argument("--tracklist", metavar="FILE",
+                   help="download every track in a list (e.g. mixgrab's tracklist.txt)")
     p.add_argument("--debug", action="store_true", help="verbose log in the data folder")
     p.add_argument("--version", action="version", version=f"slsk-reborn {__version__}")
     p.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
@@ -60,7 +62,7 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(self_test(cfg))
 
     from .app import SlskApp
-    SlskApp(cfg, demo=a.demo).run()
+    SlskApp(cfg, demo=a.demo, tracklist=a.tracklist or "").run()
 
 
 def _player_self_test() -> None:

@@ -5,6 +5,7 @@ import os
 import random
 import string
 import sys
+from pathlib import Path
 
 from rich.table import Table
 from rich.text import Text
@@ -13,8 +14,8 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Center, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import (Button, DataTable, DirectoryTree, Input, Label, ListItem, ListView,
-                             LoadingIndicator, Static, Tree)
+from textual.widgets import (Button, Checkbox, DataTable, DirectoryTree, Input, Label, ListItem, ListView,
+                             LoadingIndicator, Static, TextArea, Tree)
 
 from .engine import RoomInfo, UserCard
 from .theme import logo
@@ -227,6 +228,75 @@ class ListsScreen(ModalScreen[tuple[str, str] | None]):
         self.dismiss(None)
 
 
+class TracklistScreen(ModalScreen[tuple | None]):
+    """Paste a tracklist (or load mixgrab's tracklist.txt); returns (tracks, prefer_lossless, name)."""
+
+    BINDINGS = [Binding("escape", "dismiss(None)", "Close")]
+
+    def __init__(self, path: str = ""):
+        super().__init__()
+        self.path = path
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="tl-box", classes="modal-box"):
+            yield Static("[b $primary]♫ Download a tracklist[/]\n[dim]One track per line, “Artist - Title”. "
+                         "Numbers, timestamps and mixgrab's tracklist.txt are fine.[/]", markup=True)
+            yield TextArea(id="tl-text")
+            yield Static(id="tl-count")
+            with Horizontal(id="tl-file-row"):
+                yield Input(placeholder="…or a file path, then enter", id="tl-file", value=self.path)
+                yield Checkbox("prefer lossless", value=True, id="tl-lossless")
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Find & download", variant="primary", id="tl-go")
+                yield Button("Cancel", id="tl-cancel")
+
+    def on_mount(self) -> None:
+        if self.path:
+            self._load(self.path)
+        self.query_one("#tl-text", TextArea).focus()
+        self._count()
+
+    def _tracks(self):
+        from .tracklist import parse_text
+        return parse_text(self.query_one("#tl-text", TextArea).text)
+
+    @on(TextArea.Changed)
+    def _count(self) -> None:
+        n = len(self._tracks())
+        self.query_one("#tl-count", Static).update(
+            Text(f"{n} tracks recognised", "bold" if n else "dim"))
+
+    @on(Input.Submitted, "#tl-file")
+    def _file(self, e: Input.Submitted) -> None:
+        self._load(e.value.strip().strip('"'))
+
+    def _load(self, path: str) -> None:
+        try:
+            text = Path(path).expanduser().read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            self.notify(f"Can't read {path}: {e.strerror or e}", severity="error")
+            return
+        self.query_one("#tl-text", TextArea).text = text
+        self.path = path
+
+    @on(Button.Pressed, "#tl-go")
+    def _go(self) -> None:
+        tracks = self._tracks()
+        if not tracks:
+            self.notify("No “Artist - Title” lines found", severity="warning")
+            return
+        lines = self.query_one("#tl-text", TextArea).text.splitlines()
+        if len(lines) > 1 and lines[1].strip().lower().startswith("http"):  # mixgrab: title, url, ...
+            name = lines[0].strip()
+        else:
+            name = Path(self.path).stem if self.path else f"{len(tracks)} tracks"
+        self.dismiss((tracks, self.query_one("#tl-lossless", Checkbox).value, name[:24] or "tracklist"))
+
+    @on(Button.Pressed, "#tl-cancel")
+    def _cancel(self) -> None:
+        self.dismiss(None)
+
+
 class RoomListScreen(ModalScreen[str | None]):
     BINDINGS = [Binding("escape", "dismiss(None)", "Close")]
 
@@ -286,6 +356,7 @@ HELP = """\
   [b]/[/] or [b]ctrl+f[/]  new search          [b]ctrl+t[/]  cycle theme
   [b]ctrl+p[/]       command palette     [b]?[/]       this help        [b]ctrl+q[/]  quit
   [b]ctrl+l[/]       lists: wishlist, friends, blocked users (block/friend also on any user card, [b]i[/])
+  [b]ctrl+o[/]       tracklist: paste “Artist - Title” lines, every track is found and queued
 
 [b $primary]Search results[/]
   [b]enter / d[/]    download file       [b]f[/]  download the whole folder

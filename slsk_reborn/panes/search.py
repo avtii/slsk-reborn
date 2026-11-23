@@ -467,6 +467,7 @@ class SearchPane(Vertical):
             yield Static("⌕", id="search-icon")
             yield Input(placeholder="search the soulseek network…  (artist, album, track)", id="search-input")
             yield Button("Search", variant="primary", id="search-go")
+            yield Button("♫ Tracklist", id="search-tracklist")
         yield Static(id="search-empty")
         yield TabbedContent(id="search-tabs")
 
@@ -475,6 +476,7 @@ class SearchPane(Vertical):
         self.wish_views: dict[str, ResultsView] = {}
         self._wish_pending: dict[str, list[Hit]] = {}
         self._wish_noted: dict[str, float] = {}
+        self.lists: set = set()  # tracklist imports
         self.app.bus.on("search.hits", self._on_hits)
         self.app.bus.on("wishlist.hits", self._on_wishlist)
         self.query_one("#search-empty", Static).update(Text.from_markup(
@@ -496,6 +498,26 @@ class SearchPane(Vertical):
             return
         inp.value = ""
         self.new_search(q)
+
+    @on(Button.Pressed, "#search-tracklist")
+    def _tracklist_pressed(self) -> None:
+        self.app.action_tracklist()
+
+    @work
+    async def open_tracklist(self, tracks, prefer_lossless: bool, name: str) -> None:
+        if not self.app.engine.connected:
+            self.notify("Not connected yet.", severity="warning")
+            return
+        from .tracklist import TracklistView
+        tabs = self.query_one(TabbedContent)
+        pane_id = f"sr{next(_ids)}"
+        view = TracklistView(tracks, prefer_lossless, name)
+        await tabs.add_pane(TabPane(self._label(view.label, 0), view, id=pane_id))
+        tabs.display = True
+        self.query_one("#search-empty").display = False
+        tabs.active = pane_id
+        self.lists.add(view)
+        view.query_one(DataTable).focus()
 
     @work
     async def new_search(self, query: str) -> None:
@@ -560,18 +582,21 @@ class SearchPane(Vertical):
         self._wish_noted[query] = time.monotonic()
         self.app.notify(f"{n:,} files for “{query}” (Search tab)", title="★ wishlist", timeout=8)
 
-    def close_search(self, view: ResultsView) -> None:
-        if view.wish:
+    def close_search(self, view) -> None:
+        if view in self.lists:
+            view.stop()
+            self.lists.discard(view)
+        elif view.wish:
             view.stop()
             self.wish_views.pop(view.query_text, None)
-        if view.ticket is not None:
+        elif view.ticket is not None:
             view.stop()
             self.views.pop(view.ticket, None)
         tabs = self.query_one(TabbedContent)
         pane = view.parent
         if isinstance(pane, TabPane):
             tabs.remove_pane(pane.id)
-        if not self.views and not self.wish_views:
+        if not self.views and not self.wish_views and not self.lists:
             tabs.display = False
             self.query_one("#search-empty").display = True
             self.focus_input()
@@ -580,4 +605,4 @@ class SearchPane(Vertical):
         tabs = self.query_one(TabbedContent)
         if tabs.active:
             pane = tabs.get_pane(tabs.active)
-            self.close_search(pane.query_one(ResultsView))
+            self.close_search(pane.children[0])

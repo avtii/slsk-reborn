@@ -118,8 +118,42 @@ Button {
     height: 1fr;
 }
 
-ResultsView {
+ResultsView, TracklistView {
     height: 1fr;
+}
+
+#tl-summary {
+    height: 2;
+    background: $panel;
+    padding: 0 1;
+}
+
+#search-tracklist {
+    min-width: 14;
+    margin-left: 1;
+}
+
+#tl-box {
+    width: 96%;
+    max-width: 110;
+    height: 85%;
+}
+
+#tl-text {
+    height: 1fr;
+    margin: 1 0;
+}
+
+#tl-file-row {
+    height: 3;
+}
+
+#tl-file {
+    width: 1fr;
+}
+
+#tl-count {
+    height: 1;
 }
 
 .filter-row {
@@ -337,7 +371,7 @@ ListView > ListItem.-highlight {
 
 /* ------------------------------------------------------------- modals */
 
-LoginScreen, UserInfoScreen, RoomListScreen, HelpScreen, WelcomeScreen, ListsScreen {
+LoginScreen, UserInfoScreen, RoomListScreen, HelpScreen, WelcomeScreen, ListsScreen, TracklistScreen {
     align: center middle;
     background: $background 70%;
 }

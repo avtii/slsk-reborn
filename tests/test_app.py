@@ -432,3 +432,30 @@ def test_real_engine_blocks_in_settings(cfg):
     s = SlskEngine(cfg, Bus())._settings()
     assert s.users.blocked == {"spammer": BlockingFlag.ALL} and s.users.friends == {"pal"}
     assert [w.query for w in s.searches.wishlist] == ["burial untrue"]
+
+
+async def test_tracklist_import(cfg, tmp_path, monkeypatch):
+    import slsk_reborn.panes.tracklist as tl
+    from slsk_reborn.panes.tracklist import TracklistView
+    from slsk_reborn.screens import TracklistScreen
+    monkeypatch.setattr(tl, "SEARCH_WAIT", 2.0)
+    f = tmp_path / "tracklist.txt"
+    f.write_text("A mix\nhttps://youtu.be/x\nsource: comments\n\n01. Burial - Archangel\n"
+                 "02. Daft Punk - Digital Love\n03. Nobody Real - Not A Song\n", encoding="utf-8")
+    app = SlskApp(cfg, demo=True, tracklist=str(f))
+    async with app.run_test(size=(160, 45)) as pilot:
+        await _wait(pilot, lambda: isinstance(app.screen, TracklistScreen))
+        await pilot.pause(0.3)
+        assert len(app.screen._tracks()) == 3
+        await pilot.click("#tl-go")
+        await _wait(pilot, lambda: app.query(TracklistView))
+        view = app.query_one(TracklistView)
+        await _wait(pilot, lambda: all(r.state not in ("waiting", "searching") for r in view.rows), timeout=30)
+        states = {r.track.title: r.state for r in view.rows}
+        assert states["Not A Song"] == "not found"
+        assert states["Archangel"] != "not found" and states["Digital Love"] != "not found"
+        got = {(x.user, x.path) for x in app.engine.transfers()}
+        assert all((r.hit.user, r.hit.path) in got for r in view.rows if r.hit)
+        assert "archangel" in view.rows[0].hit.path.lower()
+        await pilot.press("ctrl+w")
+        await _wait(pilot, lambda: not app.query(TracklistView))

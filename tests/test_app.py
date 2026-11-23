@@ -65,7 +65,9 @@ async def test_browse_chat_shares(cfg):
         await pilot.press(*"hello", "enter")
         await pilot.press(*"/msg kassette hi", "enter")
         await pilot.pause(0.5)
-        assert len(app.query_one("ChatPane").convs) == 2
+        # the demo network may also open random PMs from fake peers, so check ours by name
+        convs = app.query_one("ChatPane").convs
+        assert "room-electronic" in convs and "pm-kassette" in convs
 
         await pilot.press("escape")
         app.query_one("#main").active = "shares"

@@ -1,4 +1,4 @@
-"""Modal screens: login, user card, room list, help, folder picker."""
+"""Modal screens: login, user card, room list, lists, help, folder picker."""
 from __future__ import annotations
 
 import os
@@ -13,8 +13,8 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Center, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import (Button, DataTable, DirectoryTree, Input, Label, LoadingIndicator,
-                             Static, Tree)
+from textual.widgets import (Button, DataTable, DirectoryTree, Input, Label, ListItem, ListView,
+                             LoadingIndicator, Static, Tree)
 
 from .engine import RoomInfo, UserCard
 from .theme import logo
@@ -88,10 +88,37 @@ class UserInfoScreen(ModalScreen[str | None]):
             with Horizontal(classes="modal-buttons"):
                 yield Button("Browse files", id="card-browse", variant="primary")
                 yield Button("Message", id="card-msg")
+                yield Button(self._friend_label(), id="card-friend")
+                yield Button(*self._block_label(), id="card-block")
                 yield Button("Close", id="card-close")
 
     def on_mount(self) -> None:
         self.load()
+
+    def _friend_label(self) -> str:
+        return "♥ Unfriend" if self.user in self.app.cfg.friends else "♥ Friend"
+
+    def _block_label(self) -> tuple[str, str]:
+        return ("Unblock", "default") if self.user in self.app.cfg.blocked else ("⛔ Block", "error")
+
+    def _labels(self) -> None:
+        self.query_one("#card-friend", Button).label = self._friend_label()
+        b = self.query_one("#card-block", Button)
+        b.label, b.variant = self._block_label()
+
+    @on(Button.Pressed, "#card-friend")
+    def _friend(self) -> None:
+        on = self.user not in self.app.cfg.friends
+        self.app.set_listed("friends", self.user, on)
+        self.notify(f"{self.user} {'added to' if on else 'removed from'} friends")
+        self._labels()
+
+    @on(Button.Pressed, "#card-block")
+    def _block(self) -> None:
+        on = self.user not in self.app.cfg.blocked
+        self.app.set_listed("blocked", self.user, on)
+        self.notify(f"{self.user} {'blocked: no messages, searches, browsing or uploads' if on else 'unblocked'}")
+        self._labels()
 
     @work(exclusive=True)
     async def load(self) -> None:
@@ -133,6 +160,70 @@ class UserInfoScreen(ModalScreen[str | None]):
 
     @on(Button.Pressed, "#card-close")
     def _c(self):
+        self.dismiss(None)
+
+
+LISTS = {
+    "wishlist": ("★ Wishlist", "searched for you every few minutes;\nnew results open a ★ tab", "add a search…"),
+    "friends": ("♥ Friends", "people you trust; shown in\nyour friends list on the server", "add a username…"),
+    "blocked": ("⛔ Blocked", "no messages, searches,\nbrowsing or uploads", "block a username…"),
+}
+
+
+class ListsScreen(ModalScreen[tuple[str, str] | None]):
+    """Wishlist, friends and blocked users. Changes apply right away."""
+
+    BINDINGS = [Binding("escape", "dismiss(None)", "Close"), Binding("delete,backspace", "remove", "Remove")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="lists-box", classes="modal-box"):
+            yield Static("[b $primary]Lists[/]   [dim]enter adds · del removes · "
+                         "enter on an entry: search now / user card[/]", markup=True)
+            with Horizontal(id="lists-cols"):
+                for key, (title, hint, placeholder) in LISTS.items():
+                    with Vertical(classes="list-col"):
+                        yield Static(f"[b]{title}[/]\n[dim]{hint}[/]", markup=True, classes="list-title")
+                        yield Input(placeholder=placeholder, id=f"in-{key}")
+                        yield ListView(id=f"lv-{key}")
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Close", id="lists-close")
+
+    async def on_mount(self) -> None:
+        for key in LISTS:
+            await self._fill(key)
+        self.query_one("#in-wishlist", Input).focus()
+
+    async def _fill(self, key: str) -> None:
+        lv = self.query_one(f"#lv-{key}", ListView)
+        await lv.clear()
+        items = getattr(self.app.cfg, key)
+        await lv.extend([ListItem(Label(v), name=v) for v in items] or
+                        [ListItem(Label(Text("— empty —", "dim")), name="", disabled=True)])
+        lv.index = 0 if items else None
+
+    @on(Input.Submitted)
+    async def _add(self, e: Input.Submitted) -> None:
+        key, value = e.input.id[3:], e.value.strip()
+        if value:
+            self.app.set_listed(key, value, True)
+            e.input.value = ""
+            for k in LISTS:  # friend <-> blocked move between lists
+                await self._fill(k)
+
+    @on(ListView.Selected)
+    def _pick(self, e: ListView.Selected) -> None:
+        if e.item.name:
+            self.dismiss(("search" if e.list_view.id == "lv-wishlist" else "user", e.item.name))
+
+    async def action_remove(self) -> None:
+        lv = self.focused
+        if isinstance(lv, ListView) and lv.highlighted_child and lv.highlighted_child.name:
+            key = lv.id[3:]
+            self.app.set_listed(key, lv.highlighted_child.name, False)
+            await self._fill(key)
+
+    @on(Button.Pressed, "#lists-close")
+    def _close(self) -> None:
         self.dismiss(None)
 
 
@@ -194,6 +285,7 @@ HELP = """\
   [b]esc[/]          leave a text box so single-key shortcuts work
   [b]/[/] or [b]ctrl+f[/]  new search          [b]ctrl+t[/]  cycle theme
   [b]ctrl+p[/]       command palette     [b]?[/]       this help        [b]ctrl+q[/]  quit
+  [b]ctrl+l[/]       lists: wishlist, friends, blocked users (block/friend also on any user card, [b]i[/])
 
 [b $primary]Search results[/]
   [b]enter / d[/]    download file       [b]f[/]  download the whole folder
@@ -201,6 +293,7 @@ HELP = """\
   [b]s[/]            cycle sort          [b]x[/]  stop search   [b]ctrl+w[/]  close tab
   [b]a[/]            album view: one row per folder with track count, size, quality;
                  [b]✔[/] = track numbers complete, [b]9/12[/] = some missing; enter downloads it
+  [b]w[/]            add this search to the wishlist (re-run every few minutes, results in a ★ tab)
   Filter box: words to include, [b]-word[/] to exclude, [b]flac[/] / [b]mp3[/] / [b]>256[/] for quality.
 
 [b $primary]Player[/]  (MP3, FLAC, WAV, OGG built in; other formats via mpv or ffplay if installed)

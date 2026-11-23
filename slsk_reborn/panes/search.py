@@ -126,6 +126,7 @@ class ResultsView(Vertical):
         Binding("d", "download", "Download"),
         Binding("f", "download_folder", "Folder"),
         Binding("a", "toggle_albums", "Albums"),
+        Binding("w", "wishlist", "Wishlist"),
         Binding("b", "browse", "Browse user"),
         Binding("i", "info", "User info"),
         Binding("m", "message", "Message"),
@@ -134,9 +135,11 @@ class ResultsView(Vertical):
         Binding("ctrl+w", "close", "Close tab"),
     ]
 
-    def __init__(self, query: str, **kw):
+    def __init__(self, query: str, wish: bool = False, **kw):
         super().__init__(**kw)
         self.query_text = query
+        self.wish = wish            # results of the periodic wishlist search
+        self._seen: set[tuple[str, str]] = set()
         self.ticket: int | None = None
         self.hits: list[Hit] = []
         self.pending: list[Hit] = []
@@ -191,13 +194,22 @@ class ResultsView(Vertical):
             self.table.refresh()
 
     # ------------------------------------------------------------------ streaming
-    def add_hits(self, hits: list[Hit]) -> None:
+    @property
+    def label(self) -> str:
+        return ("★ " if self.wish else "") + self.query_text
+
+    def add_hits(self, hits: list[Hit]) -> int:
+        """Queue hits for display; returns how many were new."""
         if not self.running:
-            return
+            return 0
+        if self.wish:  # every wishlist round returns the same files again
+            hits = [h for h in hits if (h.user, h.path) not in self._seen]
+            self._seen.update((h.user, h.path) for h in hits)
         room = MAX_RESULTS - len(self.hits) - len(self.pending)
         self.pending.extend(hits[:max(room, 0)])
         if room <= len(hits):
             self.stop(f"stopped at {MAX_RESULTS:,} files")
+        return len(hits)
 
     def flush(self) -> None:
         if self.pending:
@@ -341,7 +353,9 @@ class ResultsView(Vertical):
     def update_summary(self) -> None:
         s = Text()
         s.append(f" “{self.query_text}” ", "bold reverse")
-        if self.running:
+        if self.wish and self.running:
+            s.append("  ★ wishlist: new results keep arriving", "bold #ffd23f")
+        elif self.running:
             s.append("  ● receiving", "bold #39ff88")
         else:
             s.append(f"  ■ {self.stop_reason}", "bold #ff8c42")
@@ -415,6 +429,13 @@ class ResultsView(Vertical):
         if (h := self.current()):
             self.app.open_pm(h.user)
 
+    def action_wishlist(self) -> None:
+        if self.app.set_listed("wishlist", self.query_text, True):
+            self.notify(f"“{self.query_text}” is on your wishlist: the network is searched for it "
+                        "every few minutes (ctrl+l to manage)", title="★ wishlist")
+        else:
+            self.notify("Already on your wishlist", severity="warning")
+
     def action_toggle_albums(self) -> None:
         self.albums_mode = not self.albums_mode
         self.app.cfg.album_view = self.albums_mode
@@ -451,7 +472,11 @@ class SearchPane(Vertical):
 
     def on_mount(self) -> None:
         self.views: dict[int, ResultsView] = {}
+        self.wish_views: dict[str, ResultsView] = {}
+        self._wish_pending: dict[str, list[Hit]] = {}
+        self._wish_noted: dict[str, float] = {}
         self.app.bus.on("search.hits", self._on_hits)
+        self.app.bus.on("wishlist.hits", self._on_wishlist)
         self.query_one("#search-empty", Static).update(Text.from_markup(
             "\n\n[b #ff2bd6]Type something above and hit Enter.[/]\n\n"
             "[dim]Results stream in live from peers. Each search opens its own tab.\n"
@@ -480,7 +505,7 @@ class SearchPane(Vertical):
         tabs = self.query_one(TabbedContent)
         pane_id = f"sr{next(_ids)}"
         view = ResultsView(query)
-        await tabs.add_pane(TabPane(self._label(query, 0), view, id=pane_id))
+        await tabs.add_pane(TabPane(self._label(view.label, 0), view, id=pane_id))
         tabs.display = True
         self.query_one("#search-empty").display = False
         tabs.active = pane_id
@@ -503,7 +528,7 @@ class SearchPane(Vertical):
         if isinstance(pane, TabPane):
             tabs = self.query_one(TabbedContent)
             try:
-                tabs.get_tab(pane.id).label = self._label(view.query_text, len(view.hits), view.running)
+                tabs.get_tab(pane.id).label = self._label(view.label, len(view.hits), view.running)
             except Exception:
                 pass
 
@@ -511,7 +536,34 @@ class SearchPane(Vertical):
         if (v := self.views.get(ticket)):
             v.add_hits(hits)
 
+    def _on_wishlist(self, query: str, hits: list[Hit]) -> None:
+        if (v := self.wish_views.get(query)) is not None:
+            if v.add_hits(hits) and time.monotonic() - self._wish_noted.get(query, 0) > 60:
+                self._wish_noted[query] = time.monotonic()  # one note per round, not per peer
+                self.app.notify(f"New results for “{query}”", title="★ wishlist")
+            return
+        first = query not in self._wish_pending
+        self._wish_pending.setdefault(query, []).extend(hits)
+        if first:
+            self._open_wish(query)
+
+    @work
+    async def _open_wish(self, query: str) -> None:
+        """Wishlist results get their own tab, opened in the background."""
+        tabs = self.query_one(TabbedContent)
+        view = ResultsView(query, wish=True)
+        await tabs.add_pane(TabPane(self._label(view.label, 0), view, id=f"sr{next(_ids)}"))
+        tabs.display = True
+        self.query_one("#search-empty").display = False
+        self.wish_views[query] = view
+        n = view.add_hits(self._wish_pending.pop(query, []))
+        self._wish_noted[query] = time.monotonic()
+        self.app.notify(f"{n:,} files for “{query}” (Search tab)", title="★ wishlist", timeout=8)
+
     def close_search(self, view: ResultsView) -> None:
+        if view.wish:
+            view.stop()
+            self.wish_views.pop(view.query_text, None)
         if view.ticket is not None:
             view.stop()
             self.views.pop(view.ticket, None)
@@ -519,7 +571,7 @@ class SearchPane(Vertical):
         pane = view.parent
         if isinstance(pane, TabPane):
             tabs.remove_pane(pane.id)
-        if not self.views:
+        if not self.views and not self.wish_views:
             tabs.display = False
             self.query_one("#search-empty").display = True
             self.focus_input()

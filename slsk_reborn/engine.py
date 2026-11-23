@@ -170,6 +170,7 @@ class Engine:
     async def remove_share(self, path: str) -> None: ...
     async def rescan(self) -> None: ...
     def apply_limits(self) -> None: ...
+    def apply_lists(self) -> None: ...   # cfg.friends / blocked / wishlist changed
 
 
 # ----------------------------------------------------------------------------- real engine
@@ -179,6 +180,11 @@ _STATE_NAMES = {
     "DOWNLOADING": "transferring", "UPLOADING": "transferring", "COMPLETE": "done",
     "FAILED": "failed", "ABORTED": "aborted", "PAUSED": "paused", "INCOMPLETE": "incomplete",
 }
+
+
+def _blocked(users: list[str]) -> dict:
+    from aioslsk.user.model import BlockingFlag
+    return {u: BlockingFlag.ALL for u in users}
 
 
 def _directory_command(user: str, folder: str):
@@ -242,7 +248,7 @@ class SlskEngine(Engine):
                                                if os.path.isdir(d)]),
             transfers=TransfersSettings(limits=TransferLimitSettings(upload_slots=c.upload_slots)),
             rooms=RoomsSettings(auto_join=False),
-            users=UsersSettings(friends=set(c.friends)),
+            users=UsersSettings(friends=set(c.friends), blocked=_blocked(c.blocked)),
         )
 
     async def start(self) -> None:
@@ -309,14 +315,19 @@ class SlskEngine(Engine):
 
     def _on_search_result(self, event):
         ticket = event.query.ticket
-        if ticket not in self._searches:
+        wish = getattr(getattr(event.query, "search_type", None), "name", "") == "WISHLIST"
+        if ticket not in self._searches and not wish:
             return
         r = event.result
+        if r.username in self.cfg.blocked:
+            return
         hits = [self._hit(r, f, False) for f in r.shared_items]
         hits += [self._hit(r, f, True) for f in r.locked_results]
         hits = [h for h in hits if not self.cfg.min_bitrate or not h.bitrate
                 or h.bitrate >= self.cfg.min_bitrate]
-        if hits:
+        if hits and wish:
+            self.bus.emit("wishlist.hits", query=event.query.query, hits=hits)
+        elif hits:
             self.bus.emit("search.hits", ticket=ticket, hits=hits)
 
     @staticmethod
@@ -529,3 +540,12 @@ class SlskEngine(Engine):
         s.network.limits.download_speed_kbps = self.cfg.download_limit_kbps
         s.credentials.info.description = self.cfg.description
         self.client.network.load_speed_limits()
+
+    def apply_lists(self) -> None:
+        if not self.client:
+            return
+        from aioslsk.settings import WishlistSettingEntry
+        s = self.client.settings
+        s.users.friends = set(self.cfg.friends)
+        s.users.blocked = _blocked(self.cfg.blocked)  # aioslsk drops their PMs, searches, uploads...
+        s.searches.wishlist = [WishlistSettingEntry(query=q) for q in self.cfg.wishlist]

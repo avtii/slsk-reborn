@@ -18,7 +18,7 @@ from .fallback import alt_query, good_enough, pick_alternative
 from .panes import BrowsePane, ChatPane, SearchPane, SharesPane, TransfersPane
 from .player import Player, album_queue
 from .playerbar import PlayerBar
-from .screens import HelpScreen, LoginScreen, RoomListScreen, UserInfoScreen, WelcomeScreen
+from .screens import HelpScreen, ListsScreen, LoginScreen, RoomListScreen, UserInfoScreen, WelcomeScreen
 from .theme import THEMES, mini_logo
 from .util import basename, human_speed
 
@@ -95,6 +95,7 @@ class SlskApp(App):
         Binding("slash,ctrl+f", "new_search", "Search", key_display="/"),
         Binding("question_mark,f1", "help", "Help", key_display="?"),
         Binding("ctrl+t", "cycle_theme", "Theme"),
+        Binding("ctrl+l", "lists", "Lists"),
         Binding("ctrl+q", "quit", "Quit", priority=True),
     ]
 
@@ -397,6 +398,35 @@ class SlskApp(App):
                 self.open_pm(user)
 
         self.push_screen(UserInfoScreen(user), done)
+
+    def set_listed(self, key: str, value: str, on: bool) -> bool:
+        """Add to / remove from cfg.wishlist, friends or blocked; saved and applied at once."""
+        items: list[str] = getattr(self.cfg, key)
+        if on == (value in items):
+            return False
+        if on:
+            items.append(value)
+            other = {"friends": "blocked", "blocked": "friends"}.get(key)
+            if other and value in getattr(self.cfg, other):  # can't be both
+                getattr(self.cfg, other).remove(value)
+        else:
+            items.remove(value)
+        self.cfg.save()
+        self.engine.apply_lists()
+        return True
+
+    def action_lists(self) -> None:
+        def done(pick):
+            if not pick:
+                return
+            kind, value = pick
+            if kind == "search":
+                self.action_tab("search")
+                self.query_one(SearchPane).new_search(value)
+            else:
+                self.show_user(value)
+
+        self.push_screen(ListsScreen(), done)
 
     def open_pm(self, user: str) -> None:
         self.action_tab("chat")

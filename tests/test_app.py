@@ -366,3 +366,69 @@ async def test_failed_download_switches_source(cfg, monkeypatch):
         await _wait(pilot, lambda: any(t.user == "quick" for t in eng.transfers()), timeout=10)
         assert not any(t.user == "lowpass" for t in eng.transfers())
         assert 77 in eng._stopped
+
+
+async def test_wishlist_friends_blocked(cfg):
+    from slsk_reborn.screens import ListsScreen, UserInfoScreen
+    app = SlskApp(cfg, demo=True)
+    async with app.run_test(size=(160, 45)) as pilot:
+        await _wait(pilot, lambda: app.engine.connected)
+        await pilot.press(*"aphex", "enter")
+        await _wait(pilot, lambda: app.query(ResultsView) and app.query_one(ResultsView).hits)
+        view = app.query_one(ResultsView)
+        view.table.focus()
+        await pilot.press("w")                                   # search -> wishlist
+        assert cfg.wishlist == ["aphex"]
+        pane = app.query_one("SearchPane")
+        await _wait(pilot, lambda: "aphex" in pane.wish_views and pane.wish_views["aphex"].hits)
+        wv = pane.wish_views["aphex"]
+        n = len(wv.hits)
+        await app.engine._wishlist_pass(0)                       # the next round: nothing new
+        await pilot.pause(0.5)
+        assert len(wv.hits) == n and wv.label == "★ aphex"
+
+        # lists screen: block someone, they vanish from new searches and chat
+        await pilot.press("ctrl+l")
+        await _wait(pilot, lambda: isinstance(app.screen, ListsScreen))
+        app.screen.query_one("#in-blocked").focus()
+        await pilot.press(*"flac_monk", "enter")
+        assert cfg.blocked == ["flac_monk"]
+        await _wait(pilot, lambda: len(app.screen.query_one("#lv-blocked").children) == 1
+                    and app.screen.query_one("#lv-blocked").children[0].name == "flac_monk")
+        await pilot.press("escape")
+        app.engine.bus.emit("pm", user="flac_monk", text="hi", ts=0, outgoing=False)
+        assert "flac_monk" not in str(app.query_one("ChatPane").__dict__.get("logs", {}))
+        app.query_one("SearchPane").new_search("aphex")
+        await pilot.pause(3)
+        latest = [v for v in app.query(ResultsView) if not v.wish][-1]
+        assert latest.hits and not any(h.user == "flac_monk" for h in latest.hits)
+
+        # user card: friend, then block moves them from friends to blocked
+        app.show_user("kassette")
+        await _wait(pilot, lambda: isinstance(app.screen, UserInfoScreen))
+        await pilot.pause(0.2)
+        await pilot.pause(0.2)
+        await pilot.click("#card-friend")
+        await _wait(pilot, lambda: cfg.friends == ["kassette"])
+        await pilot.click("#card-block")
+        await _wait(pilot, lambda: cfg.friends == [] and "kassette" in cfg.blocked)
+        await pilot.press("escape")
+
+        # remove from the lists screen
+        await pilot.press("ctrl+l")
+        await _wait(pilot, lambda: isinstance(app.screen, ListsScreen))
+        lv = app.screen.query_one("#lv-blocked")
+        lv.focus()
+        await pilot.press("delete")
+        await _wait(pilot, lambda: cfg.blocked == ["kassette"])
+        saved = Config.load(cfg.path)
+        assert saved.blocked == ["kassette"] and saved.wishlist == ["aphex"]
+
+
+def test_real_engine_blocks_in_settings(cfg):
+    from aioslsk.user.model import BlockingFlag
+    from slsk_reborn.engine import Bus, SlskEngine
+    cfg.blocked, cfg.friends, cfg.wishlist = ["spammer"], ["pal"], ["burial untrue"]
+    s = SlskEngine(cfg, Bus())._settings()
+    assert s.users.blocked == {"spammer": BlockingFlag.ALL} and s.users.friends == {"pal"}
+    assert [w.query for w in s.searches.wishlist] == ["burial untrue"]

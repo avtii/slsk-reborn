@@ -337,7 +337,7 @@ ListView > ListItem.-highlight {
 
 /* ------------------------------------------------------------- modals */
 
-LoginScreen, UserInfoScreen, RoomListScreen, HelpScreen, WelcomeScreen {
+LoginScreen, UserInfoScreen, RoomListScreen, HelpScreen, WelcomeScreen, ListsScreen {
     align: center middle;
     background: $background 70%;
 }
@@ -382,7 +382,8 @@ LoginScreen, UserInfoScreen, RoomListScreen, HelpScreen, WelcomeScreen {
 }
 
 #card-box {
-    width: 70;
+    width: 100;
+    max-width: 95%;
     height: auto;
     max-height: 80%;
 }
@@ -393,6 +394,35 @@ LoginScreen, UserInfoScreen, RoomListScreen, HelpScreen, WelcomeScreen {
 
 #card-body {
     margin: 1 0;
+}
+
+#lists-box {
+    width: 96%;
+    max-width: 120;
+    height: 80%;
+}
+
+#lists-cols {
+    height: 1fr;
+    margin: 1 0;
+}
+
+.list-col {
+    width: 1fr;
+    margin: 0 1;
+}
+
+.list-title {
+    height: 3;
+}
+
+.list-col ListView {
+    height: 1fr;
+    border: round $panel-lighten-2;
+}
+
+.list-col ListView:focus {
+    border: round $primary;
 }
 
 #rooms-box {

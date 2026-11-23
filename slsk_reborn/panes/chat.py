@@ -129,9 +129,13 @@ class ChatPane(Vertical):
 
     # ----------------------------------------------------------------- bus events
     def _on_pm(self, user: str, text: str, ts: float, outgoing: bool) -> None:
+        if user in self.app.cfg.blocked and not outgoing:
+            return
         self._write("pm", user, self.app.engine.username if outgoing else user, text, ts, me=outgoing)
 
     def _on_room_msg(self, room: str, user: str, text: str, ts: float) -> None:
+        if user in self.app.cfg.blocked:
+            return
         self._write("room", room, user, text, ts)
 
     def _on_room_user(self, room: str, user: str, joined: bool) -> None:

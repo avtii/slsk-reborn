@@ -66,6 +66,8 @@ class DemoEngine(Engine):
         self.bus.emit("shares.scanned", folders=318, files=4026)
         self._spawn(self._uploader())
         self._spawn(self._chatter())
+        if self.cfg.wishlist:
+            self._spawn(self._wishlist_pass(4.0))
 
     async def stop(self):
         for t in list(self._tasks):
@@ -88,6 +90,8 @@ class DemoEngine(Engine):
         words = [w for w in query.lower().split() if w]
         for user in random.sample(PEERS, len(PEERS)):
             await asyncio.sleep(random.uniform(0.05, 0.4))
+            if user in self.cfg.blocked:
+                continue
             free, queue, speed = random.random() < .6, random.randint(0, 40), random.randint(40_000, 9_000_000)
             hits = []
             for folder in self._lib(user):
@@ -250,3 +254,21 @@ class DemoEngine(Engine):
 
     def apply_limits(self):
         pass
+
+    def apply_lists(self):
+        if self.cfg.wishlist and self.connected:
+            self._spawn(self._wishlist_pass())
+
+    async def _wishlist_pass(self, delay: float = 1.5):
+        """What the server's periodic wishlist search does, once."""
+        await asyncio.sleep(delay)
+        for q in list(self.cfg.wishlist):
+            words = q.lower().split()
+            for user in PEERS:
+                if user in self.cfg.blocked:
+                    continue
+                hits = [Hit(user, f.path, f.size, f.ext, f.bitrate, f.duration, 44100, True, 0, 2_000_000)
+                        for folder in self._lib(user) for f in folder.files
+                        if all(w in f.path.lower() for w in words)]
+                if hits:
+                    self.bus.emit("wishlist.hits", query=q, hits=hits)

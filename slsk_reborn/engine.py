@@ -230,6 +230,45 @@ def _directory_command(user: str, folder: str):
     return Cmd(user, folder)
 
 
+def _safe_part(name: str) -> str:
+    """A folder or file name sent by a peer, made safe to put under the download folder.
+
+    Peers choose the names in their file paths. A name like ".." would land the
+    download outside the download folder, and on Windows "C:x" is a path on
+    another drive. Such names are replaced, so every download stays inside.
+    """
+    if os.name == "nt":
+        name = name.replace(":", "_")
+    name = "".join(c for c in name if c >= " ")
+    return name if name.strip(" .") else "_"
+
+
+def _naming_strategies() -> list:
+    """aioslsk naming that keeps the remote album folder: Downloads/<album>/<file>."""
+    import re
+
+    from aioslsk.naming import NamingStrategy, NumberDuplicateStrategy
+    from aioslsk.utils import split_remote_path
+
+    class FileName(NamingStrategy):
+        def apply(self, remote_path, local_dir, local_filename):
+            parts = split_remote_path(remote_path)
+            return local_dir, _safe_part(parts[-1] if parts else "")
+
+    class AlbumFolder(NamingStrategy):
+        def apply(self, remote_path, local_dir, local_filename):
+            parts = split_remote_path(remote_path)
+            if len(parts) < 2 or parts[-2].startswith("@@") or re.match(r"[a-zA-Z]:", parts[-2]):
+                return local_dir, local_filename
+            folder = os.path.join(local_dir, _safe_part(parts[-2]))
+            inside = os.path.abspath(local_dir)
+            if os.path.dirname(os.path.abspath(folder)) != inside:
+                return local_dir, local_filename
+            return folder, local_filename
+
+    return [FileName(), AlbumFolder(), NumberDuplicateStrategy()]
+
+
 class SlskEngine(Engine):
     def __init__(self, cfg: Config, bus: Bus):
         super().__init__(cfg, bus)
@@ -275,8 +314,6 @@ class SlskEngine(Engine):
                                     RoomMessageEvent, ScanCompleteEvent, SearchRequestReceivedEvent,
                                     SearchResultEvent,
                                     SessionDestroyedEvent, SessionInitializedEvent)
-        from aioslsk.naming import (DefaultNamingStrategy, KeepDirectoryStrategy,
-                                    NumberDuplicateStrategy)
         from aioslsk.shares.cache import SharesShelveCache
         from aioslsk.transfer.cache import TransferShelveCache
 
@@ -287,9 +324,7 @@ class SlskEngine(Engine):
         self.client = SoulSeekClient(self._settings(),
                                      shares_cache=SharesShelveCache(str(data)),
                                      transfer_cache=TransferShelveCache(str(data)))
-        # keep the remote album folder: Downloads/<album>/<file>
-        self.client.shares.naming_strategies = [DefaultNamingStrategy(), KeepDirectoryStrategy(),
-                                                NumberDuplicateStrategy()]
+        self.client.shares.naming_strategies = _naming_strategies()
         ev = self.client.events
         ev.register(SearchResultEvent, self._on_search_result)
         ev.register(PrivateMessageEvent, self._on_pm)

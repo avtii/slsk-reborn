@@ -282,6 +282,13 @@ async def test_player(cfg, tmp_path, monkeypatch):
         before = p.position
         await pilot.press("left")
         assert p.position >= before - 1
+        main = app.query_one("#main")                  # ...and switch tabs on the top tab row
+        main.query_one("Tabs").focus()
+        before = p.position
+        await pilot.press("right")
+        assert main.active == "transfers" and p.position < before + 5
+        await pilot.press("left")
+        assert main.active == "search"
         app.set_focus(None)
         await pilot.press("minus", "minus")
         assert abs(p.volume - 0.6) < 0.01

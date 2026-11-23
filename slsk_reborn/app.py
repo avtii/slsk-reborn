@@ -328,10 +328,10 @@ class SlskApp(App):
         self.query_one(PlayerBar).tick()
 
     def action_arrow_seek(self, delta: float) -> None:
-        from textual.widgets import Input, TextArea
+        from textual.widgets import Input, Tabs, TextArea
         if (not self.player.queue or self.player.state not in ("playing", "paused")
-                or isinstance(self.focused, (Input, TextArea)) or len(self.screen_stack) > 1):
-            raise SkipAction()  # the key goes to the focused widget as usual
+                or isinstance(self.focused, (Input, TextArea, Tabs)) or len(self.screen_stack) > 1):
+            raise SkipAction()  # text cursor, tab row (switch tabs), dialogs: the key works as usual
         self.action_seek(delta)
 
     def action_volume(self, delta: float) -> None:

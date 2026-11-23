@@ -29,6 +29,8 @@ Ready-to-run executables (no Python needed) are on the [Releases page](https://g
 | Windows 10/11 (64-bit) | `slsk-reborn-windows-x64.exe` |
 | macOS, Apple Silicon (M1 and later) | `slsk-reborn-macos-arm64` |
 | macOS, Intel | `slsk-reborn-macos-x64` |
+| Linux x86-64 (glibc 2.35+) | `slsk-reborn-linux-x64` |
+| Linux ARM64 (glibc 2.35+, e.g. Raspberry Pi 4/5 with a 64-bit OS) | `slsk-reborn-linux-arm64` |
 
 Run them from a terminal: Windows Terminal on Windows, Terminal or iTerm2 on macOS.
 
@@ -39,6 +41,56 @@ Run them from a terminal: Windows Terminal on Windows, Terminal or iTerm2 on mac
   xattr -d com.apple.quarantine slsk-reborn-macos-arm64
   ./slsk-reborn-macos-arm64
   ```
+
+## Linux
+
+### Ready-made binary
+
+Works on any glibc distro from 2022 on: Ubuntu 22.04+, Debian 12+, Fedora 36+, Linux Mint 21+,
+Pop!_OS 22.04+, Arch, Manjaro, openSUSE Leap 15.5+/Tumbleweed, and others.
+
+```sh
+curl -LO https://github.com/avtii/slsk-reborn/releases/latest/download/slsk-reborn-linux-x64
+chmod +x slsk-reborn-linux-x64
+sudo install -m 755 slsk-reborn-linux-x64 /usr/local/bin/slsk-reborn
+slsk-reborn
+```
+
+On ARM64 use `slsk-reborn-linux-arm64`. Alpine and other musl distros can't run the binary; use one of
+the Python installs below.
+
+### Install with Python (any distro)
+
+Distros mark the system Python as externally managed, so install into an isolated tool environment
+with **pipx** or **uv**. You get a `slsk-reborn` command on your PATH, and updating is one command.
+
+| Distro | Setup | Install |
+|---|---|---|
+| Ubuntu 24.04+, Debian 12+, Mint 22+ | `sudo apt install pipx git && pipx ensurepath` | `pipx install git+https://github.com/avtii/slsk-reborn` |
+| Fedora | `sudo dnf install pipx git && pipx ensurepath` | same |
+| Arch, Manjaro, EndeavourOS | `sudo pacman -S python-pipx git && pipx ensurepath` | same |
+| Ubuntu 22.04, Mint 21, openSUSE, others | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `uv tool install git+https://github.com/avtii/slsk-reborn` |
+
+Open a new terminal after `ensurepath` or the uv installer so the PATH change applies. Update with
+`pipx upgrade slsk-reborn` or `uv tool upgrade slsk-reborn`. Python 3.11+ is needed. On Ubuntu 22.04
+(Python 3.10) use the uv line, which downloads a current Python on its own.
+
+### Build the executable yourself
+
+```sh
+# Debian/Ubuntu: sudo apt install git python3-venv binutils
+# Fedora:        sudo dnf install git python3 binutils
+# Arch:          sudo pacman -S git python binutils
+git clone https://github.com/avtii/slsk-reborn
+cd slsk-reborn
+python3 -m venv .venv && . .venv/bin/activate
+pip install . pyinstaller
+python packaging/build.py          # -> dist/slsk-reborn-linux-<arch>
+./dist/slsk-reborn-linux-* --self-test
+```
+
+PyInstaller uses `objdump` from binutils. The binary only runs on systems with the same or a newer glibc
+than the one it was built on.
 
 ## Install from source
 

@@ -266,12 +266,13 @@ async def test_player(cfg, tmp_path, monkeypatch):
         app.set_focus(None)
         await pilot.press("space")
         assert p.state == "paused"
+        assert "space play" in str(bar.bar_text(150))
         await pilot.press("space")
         assert p.state == "playing"
         await pilot.press("right_square_bracket")
         assert p.position >= 10
         text = str(bar.bar_text(150))
-        assert "← → seek" in text and "− vol" in text and text.rstrip().endswith("+   2/3")
+        assert "space pause" in text and "← → seek" in text and "− vol" in text and text.rstrip().endswith("+   2/3")
         before = p.position
         await pilot.press("right")                 # arrows seek while playing
         assert p.position >= before + 9

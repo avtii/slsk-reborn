@@ -48,23 +48,37 @@ class PlayerBar(Static):
             head.append(f"  {tr.album}", "dim italic")
 
         pos, dur = p.position, tr.duration
-        tail = Text()
-        tail.append(f"  {clock(pos)}", "bold #00e5ff")
+        when = Text()
+        when.append(f"  {clock(pos)}", "bold #00e5ff")
         if dur:
-            tail.append(f" / {clock(dur)}", "dim")
-        tail.append("   ← →", "bold #00e5ff")
-        tail.append(" seek", "dim")
+            when.append(f" / {clock(dur)}", "dim")
+        play = Text()
+        play.append("   space", "bold #00e5ff")
+        play.append(" play" if p.state == "paused" else " pause", "dim")
+        seek = Text()
+        seek.append("   ← →", "bold #00e5ff")
+        seek.append(" seek", "dim")
         vol = int(round(p.volume * 10))
-        tail.append("   − ", "bold #ff2bd6")
-        tail.append("vol ", "dim")
-        tail.append("▮" * vol, "#ff2bd6")
-        tail.append("▯" * (10 - vol), "dim")
-        tail.append(" +", "bold #ff2bd6")
+        rest = Text()
+        rest.append("   − ", "bold #ff2bd6")
+        rest.append("vol ", "dim")
+        rest.append("▮" * vol, "#ff2bd6")
+        rest.append("▯" * (10 - vol), "dim")
+        rest.append(" +", "bold #ff2bd6")
         if len(p.queue) > 1:
-            tail.append(f"   {p.index + 1}/{len(p.queue)}", "#b388ff")
+            rest.append(f"   {p.index + 1}/{len(p.queue)}", "#b388ff")
         if not p.native:
-            tail.append("   ext", "dim")
-        tail.append(" ")
+            rest.append("   ext", "dim")
+        rest.append(" ")
+        # key hints only when they fit next to a 12-cell bar and a 20-cell title
+        tail = Text()
+        tail.append_text(when)
+        room = width - when.cell_len - rest.cell_len - 12 - 20 - 2
+        for hint in (play, seek):
+            if hint.cell_len <= room:
+                tail.append_text(hint)
+                room -= hint.cell_len
+        tail.append_text(rest)
 
         # the progress bar gets what's left, the title gives way first
         bar_w = max(12, min(48, width - tail.cell_len - 34))

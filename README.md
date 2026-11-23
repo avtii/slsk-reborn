@@ -125,7 +125,7 @@ slsk-reborn --tracklist tracklist.txt   # find and download every track in a lis
 python -m slsk_reborn  # same thing
 ```
 
-On the first start a login box opens. A Soulseek account is created automatically the first time you log in with a new name. **Use a different account from any other Soulseek client you run.** The server allows only one session per name, so two clients on the same account keep kicking each other off.
+On the first start a login box opens. A Soulseek account is created automatically the first time you log in with a new name. Pick a password you don't use anywhere else: the Soulseek server login sends it unencrypted. **Use a different account from any other Soulseek client you run.** The server allows only one session per name, so two clients on the same account keep kicking each other off.
 
 ![login](docs/login.svg)
 
@@ -167,7 +167,7 @@ Everything lives in `~/.slsk-reborn/` (set `SLSK_REBORN_HOME` to move it):
 - `config.toml`: account, folders, limits, theme, rooms, wishlist, friends and blocked users. On macOS and Linux it is created readable only by you, because it holds your password.
 - `shares/` and `transfers/`: caches, so the shares index and the transfer queue survive restarts.
 - `searches.json`: the search tabs that were open when you quit (up to 20 tabs, 3,000 files each), reopened on the next start.
-- `slsk-reborn.log`: run with `--debug` for full protocol logging.
+- `slsk-reborn.log`: run with `--debug` for protocol diagnostics. Authentication messages are excluded. Logs can still contain private conversations and filenames. Older debug logs can contain your password.
 
 Downloads go to `~/Music/slsk-reborn` by default. You can change this in the Shares tab.
 

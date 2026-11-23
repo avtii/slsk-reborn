@@ -201,8 +201,12 @@ HELP = """\
   [b]s[/]            cycle sort          [b]x[/]  stop search   [b]ctrl+w[/]  close tab
   Filter box: words to include, [b]-word[/] to exclude, [b]flac[/] / [b]mp3[/] / [b]>256[/] for quality.
 
+[b $primary]Player[/]  (MP3, FLAC, WAV, OGG built in; other formats via mpv or ffplay if installed)
+  [b]enter[/] on a finished download plays it, the rest of its folder follows
+  [b]space[/] play/pause   [b][ ][/] seek ∓10s   [b]- +[/] volume   [b]< >[/] prev/next   [b]\[/] stop
+
 [b $primary]Transfers[/]
-  [b]p[/] pause   [b]r[/] resume/retry   [b]x[/] abort   [b]del[/] remove   [b]c[/] clear finished
+  [b]enter[/] play   [b]p[/] pause   [b]r[/] resume/retry   [b]x[/] abort   [b]del[/] remove   [b]c[/] clear finished
   [b]o[/] open download folder
 
 [b $primary]Browse[/]

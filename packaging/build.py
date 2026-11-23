@@ -22,6 +22,7 @@ cmd = [
     "--collect-all", "textual",      # CSS, widget data
     "--collect-submodules", "rich",  # unicode width tables are imported dynamically
     "--collect-all", "aioslsk",
+    "--collect-all", "miniaudio",    # cffi extension for the built-in player
     str(ROOT / "packaging" / "entry.py"),
 ]
 print(" ".join(cmd))

@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import dataclasses
+import json
 import logging
 import os
 import secrets
@@ -105,8 +106,13 @@ async def main() -> int:
             w.writeframes(os.urandom(44100 * 4 * i // 2))
         payloads[f.name] = f.read_bytes()
 
-    pw = secrets.token_urlsafe(12)
-    ua, ub = f"reborn_t{tag}a", f"reborn_t{tag}b"
+    # the server limits new registrations per IP, so reuse one throwaway pair
+    acct_file = Path(tempfile.gettempdir()) / "slsk-reborn-livetest.json"
+    try:
+        ua, ub, pw = json.loads(acct_file.read_text())
+    except (OSError, ValueError):
+        ua, ub, pw = f"reborn_t{tag}a", f"reborn_t{tag}b", secrets.token_urlsafe(12)
+        acct_file.write_text(json.dumps([ua, ub, pw]))
     A, ev_a = make_engine(root, ua, pw, a.port_a, [str(root / "share")])
     B, ev_b = make_engine(root, ub, pw, a.port_b, [])
     print(f"accounts {ua} / {ub}, ports {a.port_a} / {a.port_b}, temp {root}")

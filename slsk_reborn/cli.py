@@ -63,6 +63,23 @@ def main(argv: list[str] | None = None) -> None:
     SlskApp(cfg, demo=a.demo).run()
 
 
+def _player_self_test() -> None:
+    """Decode a generated WAV through miniaudio (no sound card needed)."""
+    import struct
+    import wave
+
+    import miniaudio
+    path = Path(tempfile.gettempdir()) / "slsk-reborn-selftest.wav"
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        w.writeframes(struct.pack("<h", 1000) * 2 * 4410)
+    decoded = miniaudio.decode_file(str(path))
+    path.unlink(missing_ok=True)
+    assert decoded.num_frames == 4410, decoded.num_frames
+
+
 def self_test(cfg: Config) -> int:
     """Headless smoke test for packaged builds: real-engine imports and settings
     (no network), then a demo login, search and results."""
@@ -77,6 +94,7 @@ def self_test(cfg: Config) -> int:
                 "aioslsk.transfer.cache", "aioslsk.transfer.model", "aioslsk.commands", "aioslsk.protocol.primitives"):
         importlib.import_module(mod)
     SlskEngine(cfg, Bus())._settings()
+    _player_self_test()
 
     async def run() -> int:
         app = SlskApp(cfg, demo=True)

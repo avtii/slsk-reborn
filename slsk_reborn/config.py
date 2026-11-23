@@ -28,6 +28,7 @@ class Config:
     min_bitrate: int = 0
     theme: str = "slsk-neon"
     welcomed: bool = False  # first-run sharing/ports notes were shown
+    volume: float = 0.8
     notify_downloads: bool = True  # toast per finished file, bell when the queue empties
     friends: list[str] = field(default_factory=list)
     blocked: list[str] = field(default_factory=list)
@@ -74,7 +75,7 @@ class Config:
 def _toml(v) -> str:
     if isinstance(v, bool):
         return "true" if v else "false"
-    if isinstance(v, int):
+    if isinstance(v, (int, float)):
         return str(v)
     if isinstance(v, list):
         return "[" + ", ".join(_toml(x) for x in v) + "]"

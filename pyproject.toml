@@ -5,7 +5,7 @@ description = "A modern, good-looking terminal Soulseek client: search, download
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-dependencies = ["aioslsk>=1.7", "textual>=1.0"]
+dependencies = ["aioslsk>=1.7", "textual>=1.0", "miniaudio>=1.59"]
 keywords = ["soulseek", "p2p", "tui", "textual", "music"]
 classifiers = [
     "Environment :: Console",

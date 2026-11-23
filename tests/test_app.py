@@ -231,3 +231,71 @@ async def test_welcome_and_download_notices(cfg):
         await app.engine.download("flac_monk", r"Music\A\01 - x.flac", 1000)
         await _wait(pilot, lambda: rings, timeout=30)
         assert any("All downloads finished" in (n.title or "") for n in app._notifications)
+
+
+def _wavs(folder, n=3, seconds=30):
+    import wave
+    folder.mkdir(parents=True, exist_ok=True)
+    out = []
+    for i in range(1, n + 1):
+        f = folder / f"0{i} - Track {i}.wav"
+        with wave.open(str(f), "wb") as w:
+            w.setnchannels(2)
+            w.setsampwidth(2)
+            w.setframerate(44100)
+            w.writeframes(bytes(44100 * 4 * seconds))
+        out.append(f)
+    return out
+
+
+async def test_player(cfg, tmp_path, monkeypatch):
+    monkeypatch.setenv("SLSK_REBORN_AUDIO", "null")  # no sound card needed
+    files = _wavs(tmp_path / "Album")
+    (tmp_path / "Album" / "cover.jpg").write_bytes(b"x")
+    app = SlskApp(cfg, demo=True)
+    async with app.run_test(size=(160, 45)) as pilot:
+        await _wait(pilot, lambda: app.engine.connected)
+        bar = app.query_one("#playerbar")
+        assert not bar.display
+        app.play_file(str(files[1]))
+        p = app.player
+        assert p.state == "playing" and p.index == 1 and len(p.queue) == 3  # folder queue, no jpg
+        await _wait(pilot, lambda: bar.display and p.position > 0.3)
+        assert "Track 2" in str(bar.bar_text(150))
+
+        app.set_focus(None)
+        await pilot.press("space")
+        assert p.state == "paused"
+        await pilot.press("space")
+        assert p.state == "playing"
+        await pilot.press("right_square_bracket")
+        assert p.position >= 10
+        await pilot.press("minus", "minus")
+        assert abs(p.volume - 0.6) < 0.01
+        await pilot.press("greater_than_sign")
+        assert p.index == 2
+        await pilot.press("less_than_sign")  # early in the track: previous track
+        assert p.index == 1
+        await pilot.press("backslash")
+        assert p.state == "stopped"
+        await _wait(pilot, lambda: not bar.display)
+
+
+def test_player_queue_advances(tmp_path, monkeypatch):
+    import time
+    from slsk_reborn.player import Player, album_queue
+    monkeypatch.setenv("SLSK_REBORN_AUDIO", "null")
+    files = _wavs(tmp_path / "A", n=2, seconds=1)
+    p = Player()
+    q, i = album_queue(str(files[0]))
+    assert p.play_files(q, i)
+    end = time.time() + 5
+    while p.index == 0 and time.time() < end:
+        p.poll()
+        time.sleep(0.05)
+    assert p.index == 1
+    while p.state != "stopped" and time.time() < end + 3:
+        p.poll()
+        time.sleep(0.05)
+    assert p.state == "stopped"
+    p.close()

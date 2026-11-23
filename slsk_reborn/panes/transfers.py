@@ -33,6 +33,7 @@ def open_path(path: str) -> None:
 
 class TransferTable(DataTable):
     BINDINGS = [
+        Binding("enter", "play", "Play"),
         Binding("p", "pause", "Pause"),
         Binding("r", "resume", "Resume/retry"),
         Binding("x", "abort", "Abort"),
@@ -148,6 +149,17 @@ class TransferTable(DataTable):
         done = [x for x in self.items.values() if x.state in ("done", "aborted", "failed")]
         self._do("remove", done)
         self.notify(f"Cleared {len(done)} finished transfers")
+
+    def action_play(self):
+        x = self.current()
+        if x is None:
+            return
+        if x.local_path and os.path.isfile(x.local_path) and (x.upload or x.state == "done"):
+            self.app.play_file(x.local_path)
+        elif not x.upload and x.state != "done":
+            self.app.notify("Not downloaded yet", severity="warning")
+        else:
+            self.app.notify("File not found on disk", severity="warning")
 
     def action_open(self):
         x = self.current()

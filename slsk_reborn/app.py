@@ -14,6 +14,8 @@ from . import __version__
 from .config import Config
 from .engine import Bus, Engine, FileEntry, SlskEngine
 from .panes import BrowsePane, ChatPane, SearchPane, SharesPane, TransfersPane
+from .player import Player, album_queue
+from .playerbar import PlayerBar
 from .screens import HelpScreen, LoginScreen, RoomListScreen, UserInfoScreen, WelcomeScreen
 from .theme import THEMES, mini_logo
 from .util import human_speed
@@ -77,6 +79,15 @@ class SlskApp(App):
         Binding("f5", "tab('chat')", "Chat", show=False),
         Binding("f6", "tab('shares')", "Shares", show=False),
         Binding("escape", "unfocus", "Leave input", show=False),
+        # player
+        Binding("space", "play_pause", "Play/Pause", show=False),
+        Binding("left_square_bracket", "seek(-10)", "-10s", show=False),
+        Binding("right_square_bracket", "seek(10)", "+10s", show=False),
+        Binding("minus", "volume(-0.1)", "Vol -", show=False),
+        Binding("equals_sign,plus", "volume(0.1)", "Vol +", show=False),
+        Binding("less_than_sign,comma", "track(-1)", "Prev", show=False),
+        Binding("greater_than_sign,full_stop", "track(1)", "Next", show=False),
+        Binding("backslash", "stop_playback", "Stop", show=False),
         Binding("slash,ctrl+f", "new_search", "Search", key_display="/"),
         Binding("question_mark,f1", "help", "Help", key_display="?"),
         Binding("ctrl+t", "cycle_theme", "Theme"),
@@ -89,6 +100,8 @@ class SlskApp(App):
         self.demo = demo
         self.bus = Bus()
         self.engine: Engine = self._make_engine()
+        self.player = Player()
+        self.player.set_volume(cfg.volume)
 
     def _make_engine(self) -> Engine:
         if self.demo:
@@ -109,6 +122,7 @@ class SlskApp(App):
                 yield ChatPane()
             with TabPane(TABS[4][1], id="shares"):
                 yield SharesPane()
+        yield PlayerBar(id="playerbar")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -182,6 +196,10 @@ class SlskApp(App):
 
     async def action_quit(self) -> None:
         self.notify("Saving transfers and disconnecting…")
+        self.player.close()
+        if not self.demo and abs(self.cfg.volume - self.player.volume) > 0.001:
+            self.cfg.volume = self.player.volume
+            self.cfg.save()
         await self.engine.stop()
         self.exit()
 
@@ -235,6 +253,41 @@ class SlskApp(App):
                 f"✉ Chat [b reverse] {n} [/]" if n else "✉ Chat")
         except Exception:
             pass
+
+    # ------------------------------------------------------------------ player
+    def play_file(self, path: str) -> None:
+        """Play a local file; the rest of its folder follows as the queue."""
+        files, i = album_queue(path)
+        if self.player.play_files(files, i):
+            self.query_one(PlayerBar).tick()
+        else:
+            self.notify(self.player.error or "can't play this file", title="Player", severity="warning")
+
+    def action_play_pause(self) -> None:
+        if self.player.queue:
+            self.player.toggle()
+            self.query_one(PlayerBar).tick()
+
+    def action_seek(self, delta: float) -> None:
+        self.player.seek_by(delta)
+
+    def action_volume(self, delta: float) -> None:
+        self.player.set_volume(self.player.volume + delta)
+        if self.player.state != "playing" and self.player.queue:
+            self.notify(f"Volume {int(self.player.volume * 100)}%")
+
+    def action_track(self, step: int) -> None:
+        if not self.player.queue:
+            return
+        if step < 0:
+            self.player.prev()
+        elif not self.player.next():
+            self.notify("End of the queue")
+        self.query_one(PlayerBar).tick()
+
+    def action_stop_playback(self) -> None:
+        self.player.stop()
+        self.query_one(PlayerBar).tick()
 
     # ------------------------------------------------------------------ actions used by panes
     def start_download(self, user: str, path: str, size: int = 0) -> None:

@@ -230,6 +230,10 @@ class SlskApp(App):
             return
         self._quitting = True
         self.notify("Saving transfers and disconnecting… (ctrl+c again to leave now)")
+        try:  # open search tabs come back on the next start, like the transfers
+            self.query_one("SearchPane").save_session()
+        except Exception:
+            log.warning("could not save the open searches", exc_info=True)
         try:
             self.player.close()
             if not self.demo and abs(self.cfg.volume - self.player.volume) > 0.001:

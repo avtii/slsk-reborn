@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import itertools
+import json
+import os
 import re
 import time
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 
 from rich.text import Text
 from textual import on, work
@@ -117,6 +119,8 @@ class IdxText(Text):
 
 MAX_RESULTS = 10_000   # per search; the search stops itself after this many files
 FLUSH_EVERY = 0.3      # seconds between UI updates while results stream in
+SAVED_SEARCHES = 20    # open search tabs kept for the next start
+SAVED_HITS = 3_000     # files kept per saved tab (the first ones that came in)
 ROWS_PER_FLUSH = 400   # cap per update so a flood of results never blocks the UI
 RESORT_EVERY = 1.0     # seconds between in-place re-sorts while streaming
 
@@ -132,21 +136,23 @@ class ResultsView(Vertical):
         Binding("m", "message", "Message"),
         Binding("s", "cycle_sort", "Sort"),
         Binding("x", "stop", "Stop search"),
+        Binding("r", "search_again", "Search again"),
         Binding("ctrl+w", "close", "Close tab"),
     ]
 
-    def __init__(self, query: str, wish: bool = False, **kw):
+    def __init__(self, query: str, wish: bool = False, restored: list[Hit] | None = None, **kw):
         super().__init__(**kw)
+        self.restored = restored is not None  # reopened from the last session: shows saved results, no live search
         self.query_text = query
         self.wish = wish            # results of the periodic wishlist search
         self._seen: set[tuple[str, str]] = set()
         self.ticket: int | None = None
         self.hits: list[Hit] = []
-        self.pending: list[Hit] = []
+        self.pending: list[Hit] = list(restored or [])
         self.users: set[str] = set()
         self.sort = "arrival"
-        self.running = True
-        self.stop_reason = ""
+        self.running = not self.restored
+        self.stop_reason = "from last session · r searches again" if self.restored else ""
         self.flt = (False, False, "")  # free slot, lossless, filter text
         self._dirty_sort = False
         self._last_sort = 0.0
@@ -171,6 +177,9 @@ class ResultsView(Vertical):
         self._add_columns()
         self.summary = self.query_one(".summary", Static)
         self.set_interval(FLUSH_EVERY, self.flush)
+        if self.restored:
+            for b in self.query(".stop-btn"):
+                b.disabled = True
         self.update_summary()
 
     @property
@@ -455,6 +464,17 @@ class ResultsView(Vertical):
             self.stop()
             self.notify(f"Stopped search “{self.query_text}”")
 
+    def action_search_again(self) -> None:
+        """Run this query again in a fresh tab (live results) and close this one."""
+        if self.wish:
+            return
+        pane = self.app.query_one("SearchPane")
+        if not self.app.engine.connected:
+            self.notify("Not connected yet.", severity="warning")
+            return
+        pane.new_search(self.query_text)
+        pane.close_search(self)
+
     def action_close(self) -> None:
         self.app.query_one("SearchPane").close_search(self)
 
@@ -477,6 +497,7 @@ class SearchPane(Vertical):
         self._wish_pending: dict[str, list[Hit]] = {}
         self._wish_noted: dict[str, float] = {}
         self.lists: set = set()  # tracklist imports
+        self.restored: set = set()  # tabs reopened from the last session
         self.app.bus.on("search.hits", self._on_hits)
         self.app.bus.on("wishlist.hits", self._on_wishlist)
         self.query_one("#search-empty", Static).update(Text.from_markup(
@@ -485,6 +506,57 @@ class SearchPane(Vertical):
             "Green dot = free upload slot (starts right away). Glowing badge = lossless.[/]",
             justify="center"))
         self.query_one("#search-tabs").display = False
+        self.restore_session()
+
+    # ------------------------------------------------------------------ last session
+    @property
+    def session_file(self):
+        name = "searches-demo.json" if getattr(self.app, "demo", False) else "searches.json"
+        return self.app.cfg.data_dir / name
+
+    def save_session(self) -> None:
+        """Write the open search tabs (query and results, in tab order) so the next start reopens them.
+        Wishlist tabs refill themselves and tracklists are imports, so neither is kept."""
+        tabs = self.query_one(TabbedContent)
+        out, active = [], None
+        for pane in tabs.query(TabPane):
+            v = pane.children[0] if pane.children else None
+            if not isinstance(v, ResultsView) or v.wish or len(out) >= SAVED_SEARCHES:
+                continue
+            if pane.id == tabs.active:
+                active = len(out)
+            hits = (v.hits + v.pending)[:SAVED_HITS]
+            out.append({"query": v.query_text, "hits": [asdict(h) for h in hits]})
+        f = self.session_file
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"version": 1, "active": active, "searches": out}), encoding="utf-8")
+        os.replace(tmp, f)
+
+    @work
+    async def restore_session(self) -> None:
+        """Reopen the tabs saved by save_session, with their results; a damaged file is ignored."""
+        try:
+            data = json.loads(self.session_file.read_text(encoding="utf-8"))
+            names = {f.name for f in fields(Hit)}
+            saved = [(str(e["query"]), [Hit(**{k: v for k, v in h.items() if k in names}) for h in e.get("hits", [])])
+                     for e in data.get("searches", [])[:SAVED_SEARCHES]]
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            return
+        if not saved:
+            return
+        tabs = self.query_one(TabbedContent)
+        ids = []
+        for query, hits in saved:
+            view = ResultsView(query, restored=hits)
+            pane_id = f"sr{next(_ids)}"
+            await tabs.add_pane(TabPane(self._label(view.label, len(hits), False), view, id=pane_id))
+            self.restored.add(view)
+            ids.append(pane_id)
+        tabs.display = True
+        self.query_one("#search-empty").display = False
+        a = data.get("active")
+        tabs.active = ids[a] if isinstance(a, int) and 0 <= a < len(ids) else ids[-1]
 
     def focus_input(self) -> None:
         self.query_one("#search-input", Input).focus()
@@ -586,6 +658,8 @@ class SearchPane(Vertical):
         if view in self.lists:
             view.stop()
             self.lists.discard(view)
+        elif view in self.restored:
+            self.restored.discard(view)
         elif view.wish:
             view.stop()
             self.wish_views.pop(view.query_text, None)
@@ -596,7 +670,7 @@ class SearchPane(Vertical):
         pane = view.parent
         if isinstance(pane, TabPane):
             tabs.remove_pane(pane.id)
-        if not self.views and not self.wish_views and not self.lists:
+        if not self.views and not self.wish_views and not self.lists and not self.restored:
             tabs.display = False
             self.query_one("#search-empty").display = True
             self.focus_input()

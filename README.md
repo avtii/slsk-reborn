@@ -6,7 +6,7 @@ A Soulseek client for the terminal, built on [Textual](https://textual.textualiz
 
 ## Features
 
-- **Search**: each search gets its own tab and results stream in live. Results show a quality badge (green FLAC, bitrate for lossy files), the peer's speed and whether they have a free slot. You can filter as you type (`flac`, `>256`, `-live`) and sort by quality, speed, size or user. One key downloads a file, another downloads the whole album folder. Stop a search with `x` or the Stop button; each search also stops itself at 10,000 files.
+- **Search**: each search gets its own tab and results stream in live. Results show a quality badge (green FLAC, bitrate for lossy files), the peer's speed and whether they have a free slot. You can filter as you type (`flac`, `>256`, `-live`) and sort by quality, speed, size or user. One key downloads a file, another downloads the whole album folder. Stop a search with `x` or the Stop button; each search also stops itself at 10,000 files. Open search tabs come back with their results when you start the app again; `r` runs one again for fresh results.
 - **Album view**: `a` groups results into one row per folder, with track count, size, format and a completeness mark (`✔` when the track numbers run 1..n without gaps, `9/12` when some are missing). Enter downloads the album.
 - **Tracklists**: paste a list of `Artist - Title` lines (numbers and timestamps are fine) with `ctrl+o` or the **♫ Tracklist** button. Each track is searched, the best copy is picked (right artist and title, no unasked-for remix, best quality, free slot) and queued, and the ♫ tab follows every download. It reads the `tracklist.txt` that [mixgrab](https://github.com/avtii/mixgrab) writes for a YouTube mix: `slsk-reborn --tracklist tracklist.txt`.
 - **Transfers**: downloads and uploads update live with progress bars, speed, ETA and queue place. Keys pause, resume or retry, abort, remove, clear finished transfers and open the folder. Downloads keep the album folder structure. A notification (and terminal bell) says when downloads finish.
@@ -149,6 +149,7 @@ On the first start a login box opens. A Soulseek account is created automaticall
 | | `b` / `i` / `m` | browse user / user info / message |
 | | `s` | cycle sort |
 | | `x` | stop search (keeps the results) |
+| | `r` | search again (fresh results in a new tab) |
 | | `ctrl+w` | close search tab |
 | transfers | `enter` | play a finished download |
 | | `p` `r` `x` `del` | pause, resume/retry, abort, remove |
@@ -165,6 +166,7 @@ Everything lives in `~/.slsk-reborn/` (set `SLSK_REBORN_HOME` to move it):
 
 - `config.toml`: account, folders, limits, theme, rooms, wishlist, friends and blocked users. It is written with `chmod 600` because it holds your password.
 - `shares/` and `transfers/`: caches, so the shares index and the transfer queue survive restarts.
+- `searches.json`: the search tabs that were open when you quit (up to 20 tabs, 3,000 files each), reopened on the next start.
 - `slsk-reborn.log`: run with `--debug` for full protocol logging.
 
 Downloads go to `~/Music/slsk-reborn` by default. You can change this in the Shares tab.

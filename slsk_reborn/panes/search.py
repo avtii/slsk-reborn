@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import itertools
 import re
+import time
 
 from rich.text import Text
 from textual import on, work
@@ -46,6 +47,20 @@ def matches(h: Hit, flt: str) -> bool:
     return True
 
 
+class IdxText(Text):
+    """Row's first cell; carries the hit index so DataTable.sort can sort in place."""
+
+    def __init__(self, idx: int, *a, **kw):
+        super().__init__(*a, **kw)
+        self.idx = idx
+
+
+MAX_RESULTS = 10_000   # per search; the search stops itself after this many files
+FLUSH_EVERY = 0.3      # seconds between UI updates while results stream in
+ROWS_PER_FLUSH = 400   # cap per update so a flood of results never blocks the UI
+RESORT_EVERY = 1.0     # seconds between in-place re-sorts while streaming
+
+
 class ResultsView(Vertical):
     BINDINGS = [
         Binding("d", "download", "Download"),
@@ -54,6 +69,7 @@ class ResultsView(Vertical):
         Binding("i", "info", "User info"),
         Binding("m", "message", "Message"),
         Binding("s", "cycle_sort", "Sort"),
+        Binding("x", "stop", "Stop search"),
         Binding("ctrl+w", "close", "Close tab"),
     ]
 
@@ -65,99 +81,176 @@ class ResultsView(Vertical):
         self.pending: list[Hit] = []
         self.users: set[str] = set()
         self.sort = "arrival"
+        self.running = True
+        self.stop_reason = ""
+        self.flt = (False, False, "")  # free slot, lossless, filter text
+        self._dirty_sort = False
+        self._last_sort = 0.0
+        self._refilter_timer = None
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="filter-row"):
             yield Input(placeholder="filter results:  words  -exclude  flac  >256", classes="flt")
             yield Checkbox("free slot", classes="chk-free")
             yield Checkbox("lossless", classes="chk-lossless")
+            yield Button("■ Stop", variant="error", classes="stop-btn")
         yield DataTable(cursor_type="row", zebra_stripes=True, classes="results")
         yield Static(classes="summary")
 
     def on_mount(self) -> None:
-        t = self.query_one(DataTable)
+        self.table = t = self.query_one(DataTable)
         t.add_column(" ", key="slot", width=2)
         t.add_column("User", key="user", width=16)
         t.add_column("Speed", key="speed", width=9)
         t.add_column("Q", key="queue", width=4)
         t.add_column("Folder", key="folder", width=34)
-        t.add_column("File", key="file")
+        t.add_column("File", key="file", width=48)
         t.add_column("Size", key="size", width=7)
         t.add_column("Quality", key="quality", width=10)
         t.add_column("Len", key="len", width=6)
-        self.set_interval(0.4, self.flush)
+        self.summary = self.query_one(".summary", Static)
+        self.set_interval(FLUSH_EVERY, self.flush)
         self.update_summary()
 
-    # incoming hits are buffered and drawn in batches so big result floods stay smooth
+    def on_resize(self) -> None:
+        # File column takes what the fixed columns leave over; a fixed width means
+        # adding rows never re-measures the whole table
+        from textual.widgets.data_table import ColumnKey
+        col = self.table.columns.get(ColumnKey("file"))
+        w = max(20, self.size.width - (2 + 16 + 9 + 4 + 34 + 7 + 10 + 6 + 9 * 2 + 2))
+        if col is not None and col.width != w:
+            col.width = w
+            col.auto_width = False
+            self.table.refresh()
+
+    # ------------------------------------------------------------------ streaming
     def add_hits(self, hits: list[Hit]) -> None:
-        self.pending.extend(hits)
+        if not self.running:
+            return
+        room = MAX_RESULTS - len(self.hits) - len(self.pending)
+        self.pending.extend(hits[:max(room, 0)])
+        if room <= len(hits):
+            self.stop(f"stopped at {MAX_RESULTS:,} files")
 
     def flush(self) -> None:
-        if not self.pending:
-            return
-        new, self.pending = self.pending, []
-        start = len(self.hits)
-        self.hits.extend(new)
-        for h in new:
-            self.users.add(h.user)
-        if self.sort == "arrival":
-            t = self.query_one(DataTable)
+        if self.pending:
+            new, self.pending = self.pending[:ROWS_PER_FLUSH], self.pending[ROWS_PER_FLUSH:]
+            start = len(self.hits)
+            self.hits.extend(new)
+            self.users.update(h.user for h in new)
+            t = self.table
+            added = False
             for i, h in enumerate(new, start):
                 if self._visible(h):
-                    t.add_row(*self._cells(h), key=str(i))
-        else:
-            self.rebuild()
+                    t.add_row(*self._cells(i, h), key=str(i))
+                    added = True
+            if added and self.sort != "arrival":
+                self._dirty_sort = True
+            self.update_summary()
+            self.app.query_one("SearchPane").refresh_tab_label(self)
+        if self._dirty_sort and time.monotonic() - self._last_sort >= RESORT_EVERY:
+            self.resort()
+
+    def stop(self, why: str = "stopped") -> None:
+        if not self.running:
+            return
+        self.running = False
+        self.stop_reason = why
+        if self.ticket is not None:
+            self.app.engine.stop_search(self.ticket)
+        for b in self.query(".stop-btn"):
+            b.disabled = True
         self.update_summary()
         self.app.query_one("SearchPane").refresh_tab_label(self)
 
+    # ------------------------------------------------------------------ rows
     def _visible(self, h: Hit) -> bool:
-        if self.query_one(".chk-free", Checkbox).value and not h.free_slot:
+        free, lossless, text = self.flt
+        if free and not h.free_slot:
             return False
-        if self.query_one(".chk-lossless", Checkbox).value and h.ext not in LOSSLESS:
+        if lossless and h.ext not in LOSSLESS:
             return False
-        return matches(h, self.query_one(".flt", Input).value)
+        return matches(h, text)
 
-    def _cells(self, h: Hit):
-        slot = Text("●", "bold #39ff88") if h.free_slot else Text("●", "#ff4d6d")
+    def _cells(self, i: int, h: Hit):
+        slot = IdxText(i, "●", "bold #39ff88" if h.free_slot else "#ff4d6d")
         lock = "🔒 " if h.locked else ""
         return (slot, Text(h.user, user_color(h.user)), Text(human_speed(h.speed), "#7ab8ff"),
                 Text(str(h.queue), "dim" if h.queue else "#39ff88"), Text(short_dir(h.path), "dim"),
                 Text(lock + basename(h.path), "bold" if not h.locked else "dim strike"),
                 human_size(h.size), quality_text(h.ext, h.bitrate), human_duration(h.duration))
 
+    def _sort_key(self):
+        H = self.hits
+        return {
+            "quality": lambda i: -((5000 if H[i].ext in LOSSLESS else 0) + (H[i].bitrate or 0)),
+            "speed": lambda i: -(H[i].speed + (10**9 if H[i].free_slot else 0)),
+            "size": lambda i: -H[i].size,
+            "user": lambda i: (H[i].user.lower(), H[i].path),
+            "arrival": lambda i: i,
+        }[self.sort]
+
+    def resort(self) -> None:
+        """Sort rows in place, keeping the cursor on the same result."""
+        self._dirty_sort = False
+        self._last_sort = time.monotonic()
+        t = self.table
+        if not t.row_count:
+            return
+        keep = t.coordinate_to_cell_key(t.cursor_coordinate).row_key
+        offset = t.cursor_row - int(t.scroll_y)
+        k = self._sort_key()
+        t.sort("slot", key=lambda cell: k(cell.idx))
+        row = t.get_row_index(keep)
+        if row != t.cursor_row:
+            t.move_cursor(row=row, animate=False, scroll=False)
+            t.scroll_to(y=max(0, row - offset), animate=False, immediate=True)
+
     def rebuild(self) -> None:
-        t = self.query_one(DataTable)
-        idx = list(range(len(self.hits)))
-        key = {
-            "quality": lambda i: -((5000 if self.hits[i].ext in LOSSLESS else 0) + (self.hits[i].bitrate or 0)),
-            "speed": lambda i: -(self.hits[i].speed + (10**9 if self.hits[i].free_slot else 0)),
-            "size": lambda i: -self.hits[i].size,
-            "user": lambda i: (self.hits[i].user.lower(), self.hits[i].path),
-        }.get(self.sort)
-        if key:
-            idx.sort(key=key)
+        """Full redraw; only needed when the filter changes (sorting is in place)."""
+        t = self.table
+        idx = sorted(range(len(self.hits)), key=self._sort_key())
         t.clear()
         for i in idx:
             h = self.hits[i]
             if self._visible(h):
-                t.add_row(*self._cells(h), key=str(i))
+                t.add_row(*self._cells(i, h), key=str(i))
+        self._dirty_sort = False
         self.update_summary()
 
     def update_summary(self) -> None:
-        t = self.query_one(DataTable)
         s = Text()
         s.append(f" “{self.query_text}” ", "bold reverse")
+        if self.running:
+            s.append("  ● receiving", "bold #39ff88")
+        else:
+            s.append(f"  ■ {self.stop_reason}", "bold #ff8c42")
         s.append(f"  {len(self.hits):,} files", "bold #00e5ff")
         s.append(f" from {len(self.users):,} users", "#b388ff")
-        s.append(f"   showing {t.row_count:,}", "dim")
+        s.append(f"   showing {self.table.row_count:,}", "dim")
         s.append(f"   sort: {self.sort}", "#ffd23f")
-        s.append("   enter download · f folder · b browse · i info · s sort", "dim")
-        self.query_one(".summary", Static).update(s)
+        s.append("   enter download · f folder · s sort · x stop", "dim")
+        self.summary.update(s)
 
+    # ------------------------------------------------------------------ filter
     @on(Input.Changed, ".flt")
     @on(Checkbox.Changed)
     def _refilter(self) -> None:
+        # wait for a short pause in typing, then redraw once
+        if self._refilter_timer is not None:
+            self._refilter_timer.stop()
+        self._refilter_timer = self.set_timer(0.2, self._apply_filter)
+
+    def _apply_filter(self) -> None:
+        self.flt = (self.query_one(".chk-free", Checkbox).value,
+                    self.query_one(".chk-lossless", Checkbox).value,
+                    self.query_one(".flt", Input).value)
         self.rebuild()
+
+    @on(Button.Pressed, ".stop-btn")
+    def _stop_pressed(self) -> None:
+        self.stop()
+        self.table.focus()
 
     def current(self) -> Hit | None:
         t = self.query_one(DataTable)
@@ -196,7 +289,13 @@ class ResultsView(Vertical):
 
     def action_cycle_sort(self) -> None:
         self.sort = SORTS[(SORTS.index(self.sort) + 1) % len(SORTS)]
-        self.rebuild()
+        self.resort()
+        self.update_summary()
+
+    def action_stop(self) -> None:
+        if self.running:
+            self.stop()
+            self.notify(f"Stopped search “{self.query_text}”")
 
     def action_close(self) -> None:
         self.app.query_one("SearchPane").close_search(self)
@@ -257,16 +356,17 @@ class SearchPane(Vertical):
         view.query_one(DataTable).focus()
 
     @staticmethod
-    def _label(q: str, n: int) -> str:
+    def _label(q: str, n: int, running: bool = True) -> str:
         q = q if len(q) <= 18 else q[:17] + "…"
-        return f"{q} ({n})" if n else q
+        mark = "" if running else "■ "
+        return f"{mark}{q} ({n:,})" if n else f"{mark}{q}"
 
     def refresh_tab_label(self, view: ResultsView) -> None:
         pane = view.parent
         if isinstance(pane, TabPane):
             tabs = self.query_one(TabbedContent)
             try:
-                tabs.get_tab(pane.id).label = self._label(view.query_text, len(view.hits))
+                tabs.get_tab(pane.id).label = self._label(view.query_text, len(view.hits), view.running)
             except Exception:
                 pass
 
@@ -276,7 +376,7 @@ class SearchPane(Vertical):
 
     def close_search(self, view: ResultsView) -> None:
         if view.ticket is not None:
-            self.app.engine.stop_search(view.ticket)
+            view.stop()
             self.views.pop(view.ticket, None)
         tabs = self.query_one(TabbedContent)
         pane = view.parent

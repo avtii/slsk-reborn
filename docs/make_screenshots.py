@@ -25,7 +25,7 @@ async def main():
         await pilot.pause(3)
         view = app.query(ResultsView).last()
         view.sort = "quality"
-        view.rebuild()
+        view.resort()
         view.query_one("DataTable").focus()
         await pilot.press("down", "down", "down")
         await pilot.pause(0.5)

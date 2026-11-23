@@ -288,6 +288,19 @@ ListView > ListItem.-highlight {
     width: 1fr;
 }
 
+#set-download-row {
+    height: 3;
+}
+
+#set-download {
+    width: 1fr;
+}
+
+#set-download-browse {
+    min-width: 5;
+    width: 5;
+}
+
 #activity {
     height: 1fr;
     min-height: 4;
@@ -393,6 +406,65 @@ LoginScreen, UserInfoScreen, RoomListScreen, HelpScreen {
 
 #rooms-table {
     height: 1fr;
+}
+
+FolderPickerScreen {
+    align: center middle;
+    background: $background 70%;
+}
+
+#picker-box {
+    width: 90%;
+    max-width: 120;
+    height: 85%;
+}
+
+#picker-places {
+    height: auto;
+    margin: 1 0 0 0;
+}
+
+#picker-places Button {
+    min-width: 6;
+    margin-right: 1;
+    height: 3;
+}
+
+#picker-body {
+    height: 1fr;
+    margin: 1 0;
+}
+
+#picker-tree {
+    background: $surface;
+    border: tall $panel;
+    scrollbar-size-vertical: 1;
+}
+
+#picker-tree:focus {
+    border: tall $primary;
+}
+
+#picker-pathrow {
+    height: 3;
+}
+
+#picker-up {
+    min-width: 5;
+    width: 5;
+}
+
+#picker-path {
+    width: 1fr;
+}
+
+#picker-hint {
+    height: 1;
+    margin-top: 1;
+}
+
+.filter-row .stop-btn {
+    min-width: 10;
 }
 
 #help-box {

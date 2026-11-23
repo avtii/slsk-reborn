@@ -51,6 +51,7 @@ class DemoEngine(Engine):
         self._rooms: dict[str, list[str]] = {}
         self._shares = [(cfg.download_dir, 214), (r"D:\Music\Electronic", 3812)]
         self._libs: dict[str, list[Folder]] = {}
+        self._stopped: set[int] = set()
 
     def _spawn(self, coro):
         t = asyncio.create_task(coro)
@@ -94,11 +95,13 @@ class DemoEngine(Engine):
                     if all(w in f.path.lower() for w in words):
                         hits.append(Hit(user, f.path, f.size, f.ext, f.bitrate, f.duration,
                                         44100, free, queue, speed))
+            if ticket in self._stopped:
+                return
             if hits:
                 self.bus.emit("search.hits", ticket=ticket, hits=hits)
 
     def stop_search(self, ticket: int) -> None:
-        pass
+        self._stopped.add(ticket)
 
     # transfers
     async def download(self, user, path, size=0):

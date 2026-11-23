@@ -128,3 +128,81 @@ def test_cli_port(tmp_path):
     for bad in ("0", "65535", "abc"):
         with pytest.raises(SystemExit):
             build_config(["--config", str(cfg_path), "-p", bad])
+
+
+async def test_search_stop_sort_filter_cap(cfg):
+    import slsk_reborn.panes.search as sp
+    from slsk_reborn.engine import Hit
+    app = SlskApp(cfg, demo=True)
+    async with app.run_test(size=(160, 45)) as pilot:
+        await _wait(pilot, lambda: app.engine.connected)
+        await pilot.press(*"zzqq", "enter")
+        await _wait(pilot, lambda: app.query(ResultsView))
+        view = app.query_one(ResultsView)
+        await _wait(pilot, lambda: view.ticket is not None)
+        hits = [Hit(f"u{i % 9}", rf"@@s\Music\Album {i}\track {i}.flac", 1000 * i,
+                    "flac" if i % 2 else "mp3", None if i % 2 else 128 + i % 200, 200, 44100,
+                    bool(i % 3), 0, 1000 * i) for i in range(900)]
+        view.add_hits(hits)
+        await _wait(pilot, lambda: view.table.row_count == 900)  # streamed in capped chunks
+
+        # in-place sort keeps the cursor on the same result
+        view.table.focus()
+        await pilot.press("down", "down", "down")
+        before = view.current()
+        await pilot.press("s")  # -> quality
+        assert view.sort == "quality" and view.current() is before
+        first = view.hits[int(view.table.coordinate_to_cell_key((0, 0)).row_key.value)]
+        assert first.ext == "flac"
+
+        # filter applies after a short pause in typing
+        view.query_one(".flt").value = "mp3"
+        await _wait(pilot, lambda: view.table.row_count == 450)
+
+        # stop: button state, label, and no more results accepted
+        await pilot.press("x")
+        assert not view.running and app.engine._stopped == {view.ticket}
+        assert view.query_one(".stop-btn").disabled
+        view.add_hits(hits[:5])
+        assert not view.pending
+
+    # cap: a search stops itself at MAX_RESULTS
+    old = sp.MAX_RESULTS
+    sp.MAX_RESULTS = 100
+    try:
+        app = SlskApp(cfg, demo=True)
+        async with app.run_test(size=(160, 45)) as pilot:
+            await _wait(pilot, lambda: app.engine.connected)
+            await pilot.press(*"zzqq", "enter")
+            await _wait(pilot, lambda: app.query(ResultsView))
+            view = app.query_one(ResultsView)
+            view.add_hits(hits[:150])
+            assert not view.running and len(view.pending) == 100
+    finally:
+        sp.MAX_RESULTS = old
+
+
+async def test_folder_picker_adds_share(cfg, tmp_path):
+    from slsk_reborn.screens import FolderPickerScreen
+    music = tmp_path / "lib" / "Music"
+    (music / "Album").mkdir(parents=True)
+    (tmp_path / "lib" / "file.txt").write_text("x")
+    app = SlskApp(cfg, demo=True)
+    async with app.run_test(size=(160, 45)) as pilot:
+        await _wait(pilot, lambda: app.engine.connected)
+        await pilot.press("5")
+        pane = app.query_one("SharesPane")
+        pane.browse_for_share()
+        await _wait(pilot, lambda: isinstance(app.screen, FolderPickerScreen) and app.screen.query("#picker-tree"))
+        picker = app.screen
+        picker.go(str(tmp_path / "lib"))
+        tree = picker.query_one("#picker-tree")
+        # only folders are listed
+        await _wait(pilot, lambda: [c.data.path.name for c in tree.root.children] == ["Music"])
+        picker.query_one("#picker-path").value = str(music)
+        await pilot.click("#picker-ok")
+        await _wait(pilot, lambda: str(music) in cfg.shared_dirs)
+        # the same folder again is refused
+        pane.add_share(str(music))
+        await pilot.pause(0.2)
+        assert cfg.shared_dirs.count(str(music)) == 1

@@ -18,8 +18,9 @@ class SharesPane(Horizontal):
             yield Static(id="shares-title", classes="section-title")
             yield DataTable(id="shares-table", cursor_type="row", zebra_stripes=True)
             with Horizontal(id="shares-add"):
-                yield Input(placeholder="folder to share, e.g. D:\\Music", id="share-path")
-                yield Button("Add", variant="primary", id="share-add")
+                yield Button("＋ Browse…", variant="primary", id="share-browse")
+                yield Input(placeholder="…or type a folder path, e.g. D:\\Music", id="share-path")
+                yield Button("Add", id="share-add")
             with Horizontal(id="shares-buttons"):
                 yield Button("Remove selected", id="share-remove", variant="error")
                 yield Button("Rescan all", id="share-rescan")
@@ -29,7 +30,9 @@ class SharesPane(Horizontal):
             yield Static(" ⚙ Settings", classes="section-title")
             with Grid(id="settings-grid"):
                 yield Label("Download folder")
-                yield Input(id="set-download")
+                with Horizontal(id="set-download-row"):
+                    yield Input(id="set-download")
+                    yield Button("…", id="set-download-browse")
                 yield Label("Upload slots")
                 yield Input(id="set-slots", type="integer")
                 yield Label("Upload limit KB/s (0 = ∞)")
@@ -99,8 +102,36 @@ class SharesPane(Horizontal):
         inp.value = ""
         self.add_share(path)
 
+    @on(Button.Pressed, "#share-browse")
+    def browse_for_share(self) -> None:
+        from ..screens import FolderPickerScreen
+
+        def done(path: str | None) -> None:
+            if path:
+                self.add_share(path)
+
+        start = self.app.cfg.shared_dirs[-1] if self.app.cfg.shared_dirs else ""
+        self.app.push_screen(FolderPickerScreen("Pick a folder to share", start, "Share this folder"), done)
+
+    @on(Button.Pressed, "#set-download-browse")
+    def browse_for_download_dir(self) -> None:
+        from ..screens import FolderPickerScreen
+        inp = self.query_one("#set-download", Input)
+
+        def done(path: str | None) -> None:
+            if path:
+                inp.value = path
+                self.notify("Press Save settings to keep it (applies on next start).")
+
+        self.app.push_screen(FolderPickerScreen("Download folder", inp.value, "Use this folder"), done)
+
     @work
     async def add_share(self, path: str) -> None:
+        cfg = self.app.cfg
+        norm = os.path.normcase(os.path.abspath(path))
+        if any(os.path.normcase(os.path.abspath(d)) == norm for d in cfg.shared_dirs):
+            self.notify(f"Already shared: {path}", severity="warning")
+            return
         self._log(f"scanning {path}…")
         try:
             await self.app.engine.add_share(path)

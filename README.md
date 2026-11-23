@@ -6,11 +6,11 @@ A Soulseek client for the terminal, built on [Textual](https://textual.textualiz
 
 ## Features
 
-- **Search**: each search gets its own tab and results stream in live. Results show a quality badge (green FLAC, bitrate for lossy files), the peer's speed and whether they have a free slot. You can filter as you type (`flac`, `>256`, `-live`) and sort by quality, speed, size or user. One key downloads a file, another downloads the whole album folder.
+- **Search**: each search gets its own tab and results stream in live. Results show a quality badge (green FLAC, bitrate for lossy files), the peer's speed and whether they have a free slot. You can filter as you type (`flac`, `>256`, `-live`) and sort by quality, speed, size or user. One key downloads a file, another downloads the whole album folder. Stop a search with `x` or the Stop button; each search also stops itself at 10,000 files.
 - **Transfers**: downloads and uploads update live with progress bars, speed, ETA and queue place. Keys pause, resume or retry, abort, remove, clear finished transfers and open the folder. Downloads keep the album folder structure.
 - **Browse**: opens another user's shares as a folder tree with a file list. Press `d` on a folder to download it and everything below it.
 - **Chat**: rooms with a user list, private messages, unread badges, highlights when someone mentions your name, and `/join` `/leave` `/msg` `/rooms` `/clear`.
-- **Sharing**: add or remove shared folders and rescan them. You can also share your download folder, and set upload slots and upload/download speed limits, which apply live. UPnP port mapping is optional.
+- **Sharing**: pick folders to share with a built-in folder browser (drives, home, Music), or type a path. Remove or rescan them. You can also share your download folder, and set upload slots and upload/download speed limits, which apply live. UPnP port mapping is optional.
 - **Looks**: three themes (`slsk-neon`, `slsk-amber`, `slsk-matrix`; cycle with `ctrl+t`), a top bar with live speeds, and a command palette (`ctrl+p`).
 - **Demo mode**: `--demo` runs the whole UI against a simulated network, which is handy for trying it out without an account.
 
@@ -64,6 +64,7 @@ On the first start a login box opens. A Soulseek account is created automaticall
 | | `f` | download whole folder |
 | | `b` / `i` / `m` | browse user / user info / message |
 | | `s` | cycle sort |
+| | `x` | stop search (keeps the results) |
 | | `ctrl+w` | close search tab |
 | transfers | `p` `r` `x` `del` | pause, resume/retry, abort, remove |
 | | `c` / `o` | clear finished / open folder |

@@ -196,8 +196,8 @@ class TransfersPane(Vertical):
         prev, self._states = self._states, states
         if prev is None or not self.app.cfg.notify_downloads:
             return  # don't announce transfers restored from the last session
-        done = [x for x in downs if x.state == "done" and prev.get(x.key, "done") != "done"]
-        failed = [x for x in downs if x.state == "failed" and prev.get(x.key, "failed") != "failed"]
+        done = [x for x in downs if x.state == "done" and prev.get(x.key) != "done"]
+        failed = [x for x in downs if x.state == "failed" and prev.get(x.key) != "failed"]
         self._finished_batch += len(done)
         if len(done) == 1:
             self.app.notify(basename(done[0].path), title="✔ Downloaded", timeout=4)

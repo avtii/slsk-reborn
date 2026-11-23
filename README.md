@@ -7,11 +7,17 @@ A Soulseek client for the terminal, built on [Textual](https://textual.textualiz
 ## Features
 
 - **Search**: each search gets its own tab and results stream in live. Results show a quality badge (green FLAC, bitrate for lossy files), the peer's speed and whether they have a free slot. You can filter as you type (`flac`, `>256`, `-live`) and sort by quality, speed, size or user. One key downloads a file, another downloads the whole album folder. Stop a search with `x` or the Stop button; each search also stops itself at 10,000 files.
-- **Transfers**: downloads and uploads update live with progress bars, speed, ETA and queue place. Keys pause, resume or retry, abort, remove, clear finished transfers and open the folder. Downloads keep the album folder structure.
+- **Album view**: `a` groups results into one row per folder, with track count, size, format and a completeness mark (`✔` when the track numbers run 1..n without gaps, `9/12` when some are missing). Enter downloads the album.
+- **Tracklists**: paste a list of `Artist - Title` lines (numbers and timestamps are fine) with `ctrl+o` or the **♫ Tracklist** button. Each track is searched, the best copy is picked (right artist and title, no unasked-for remix, best quality, free slot) and queued, and the ♫ tab follows every download. It reads the `tracklist.txt` that [mixgrab](https://github.com/avtii/mixgrab) writes for a YouTube mix: `slsk-reborn --tracklist tracklist.txt`.
+- **Transfers**: downloads and uploads update live with progress bars, speed, ETA and queue place. Keys pause, resume or retry, abort, remove, clear finished transfers and open the folder. Downloads keep the album folder structure. A notification (and terminal bell) says when downloads finish.
+- **Another source**: when a download fails, the same file is looked up at other users (same size, or the same name and nearly the same size) and the best one is queued instead. This happens once by itself; `n` does it by hand, for example when a download is stuck far back in a queue.
+- **Player**: enter on a finished download plays it, and the rest of its folder follows. MP3, FLAC, WAV and OGG play built in; other formats play through mpv or ffplay if one is installed. `space` pauses, `[` `]` seek, `-` `+` change the volume, `<` `>` skip.
+- **Wishlist, friends, blocked users** (`ctrl+l`): wishlist searches are re-run by the server every few minutes and new results open in a ★ tab (`w` adds the current search). Blocked users can't message you, see your searches, browse you or download from you, and their results are hidden. Friend or block anyone from their user card (`i`).
 - **Browse**: opens another user's shares as a folder tree with a file list. Press `d` on a folder to download it and everything below it.
 - **Chat**: rooms with a user list, private messages, unread badges, highlights when someone mentions your name, and `/join` `/leave` `/msg` `/rooms` `/clear`.
 - **Sharing**: pick folders to share with a built-in folder browser (drives, home, Music), or type a path. Remove or rescan them. You can also share your download folder, and set upload slots and upload/download speed limits, which apply live. UPnP port mapping is optional.
 - **Looks**: three themes (`slsk-neon`, `slsk-amber`, `slsk-matrix`; cycle with `ctrl+t`), a top bar with live speeds, and a command palette (`ctrl+p`).
+- **First start**: a short note explains that Soulseek is about sharing and which ports to open on your router if UPnP can't.
 - **Demo mode**: `--demo` runs the whole UI against a simulated network, which is handy for trying it out without an account.
 
 | Transfers | Browse |
@@ -66,10 +72,10 @@ with **pipx** or **uv**. You get a `slsk-reborn` command on your PATH, and updat
 
 | Distro | Setup | Install |
 |---|---|---|
-| Ubuntu 24.04+, Debian 12+, Mint 22+ | `sudo apt install pipx git && pipx ensurepath` | `pipx install git+https://github.com/avtii/slsk-reborn` |
-| Fedora | `sudo dnf install pipx git && pipx ensurepath` | same |
-| Arch, Manjaro, EndeavourOS | `sudo pacman -S python-pipx git && pipx ensurepath` | same |
-| Ubuntu 22.04, Mint 21, openSUSE, others | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `uv tool install git+https://github.com/avtii/slsk-reborn` |
+| Ubuntu 24.04+, Debian 12+, Mint 22+ | `sudo apt install pipx && pipx ensurepath` | `pipx install slsk-reborn` |
+| Fedora | `sudo dnf install pipx && pipx ensurepath` | same |
+| Arch, Manjaro, EndeavourOS | `sudo pacman -S python-pipx && pipx ensurepath` | same |
+| Ubuntu 22.04, Mint 21, openSUSE, others | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `uv tool install slsk-reborn` |
 
 Open a new terminal after `ensurepath` or the uv installer so the PATH change applies. Update with
 `pipx upgrade slsk-reborn` or `uv tool upgrade slsk-reborn`. Python 3.11+ is needed. On Ubuntu 22.04
@@ -92,15 +98,15 @@ python packaging/build.py          # -> dist/slsk-reborn-linux-<arch>
 PyInstaller uses `objdump` from binutils. The binary only runs on systems with the same or a newer glibc
 than the one it was built on.
 
-## Install from source
+## Install with Python (Windows, macOS, Linux)
 
-Requires Python 3.11 or newer.
+Requires Python 3.11 or newer. slsk-reborn is [on PyPI](https://pypi.org/project/slsk-reborn/):
 
 ```sh
-pip install git+https://github.com/avtii/slsk-reborn
+pipx install slsk-reborn        # or: uv tool install slsk-reborn   /   pip install slsk-reborn
 ```
 
-or, from a clone:
+The latest code from GitHub: `pipx install git+https://github.com/avtii/slsk-reborn`. From a clone:
 
 ```sh
 git clone https://github.com/avtii/slsk-reborn
@@ -115,6 +121,7 @@ slsk-reborn            # connect (asks for login on first start)
 slsk-reborn --demo     # offline demo with fake peers
 slsk-reborn --theme slsk-matrix
 slsk-reborn --port 2234  # listening port for this run (also uses 2235)
+slsk-reborn --tracklist tracklist.txt   # find and download every track in a list
 python -m slsk_reborn  # same thing
 ```
 
@@ -131,15 +138,23 @@ On the first start a login box opens. A Soulseek account is created automaticall
 | | `esc` | leave a text box (so single-key shortcuts work) |
 | | `?` / `F1` | help |
 | | `ctrl+t` | cycle theme |
+| | `ctrl+l` | wishlist, friends, blocked users |
+| | `ctrl+o` | download a tracklist |
+| | `space` `[` `]` `-` `+` `<` `>` | player: pause, seek, volume, prev/next |
 | | `ctrl+q` | quit (saves transfers) |
 | search results | `enter` / `d` | download file |
 | | `f` | download whole folder |
+| | `a` | album view on/off |
+| | `w` | add the search to the wishlist |
 | | `b` / `i` / `m` | browse user / user info / message |
 | | `s` | cycle sort |
 | | `x` | stop search (keeps the results) |
 | | `ctrl+w` | close search tab |
-| transfers | `p` `r` `x` `del` | pause, resume/retry, abort, remove |
+| transfers | `enter` | play a finished download |
+| | `p` `r` `x` `del` | pause, resume/retry, abort, remove |
+| | `n` | get the same file from another user |
 | | `c` / `o` | clear finished / open folder |
+| ♫ tracklist | `enter` / `r` / `x` | search a track yourself / retry it / stop the rest |
 | browse | `d` on a folder | download it and its subfolders |
 
 The filter box above the results takes words to include, `-word` to exclude, `flac`/`mp3`/`lossless` for format, and `>256` for a minimum bitrate.
@@ -148,7 +163,7 @@ The filter box above the results takes words to include, `-word` to exclude, `fl
 
 Everything lives in `~/.slsk-reborn/` (set `SLSK_REBORN_HOME` to move it):
 
-- `config.toml`: account, folders, limits, theme, rooms. It is written with `chmod 600` because it holds your password.
+- `config.toml`: account, folders, limits, theme, rooms, wishlist, friends and blocked users. It is written with `chmod 600` because it holds your password.
 - `shares/` and `transfers/`: caches, so the shares index and the transfer queue survive restarts.
 - `slsk-reborn.log`: run with `--debug` for full protocol logging.
 
@@ -164,7 +179,7 @@ python docs/make_screenshots.py
 pip install pyinstaller && python packaging/build.py   # executable for this OS in dist/
 ```
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`. It builds the Windows and macOS executables, runs `--self-test` on each, and publishes them as a GitHub release.
+Pushing a `v*` tag builds the executables, publishes the GitHub release and uploads the package to PyPI. See [RELEASING.md](RELEASING.md).
 
 The UI talks only to an `Engine` interface (`slsk_reborn/engine.py`) through plain dataclasses and a small event bus. `SlskEngine` wraps aioslsk, and `DemoEngine` (`slsk_reborn/demo.py`) simulates the network for tests and screenshots.
 

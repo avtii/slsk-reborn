@@ -499,3 +499,54 @@ async def test_pause_finished_upload_is_refused_politely(cfg):
         assert any("only queued or running" in n for n in notes)
         assert any("other user asks again" in n for n in notes)
         assert not any("Transfer(" in n for n in notes)
+
+
+async def test_ctrl_c_quits_cleanly_but_copies_selected_text(cfg):
+    app = SlskApp(cfg, demo=True)
+    async with app.run_test(size=(160, 45)) as pilot:
+        await _wait(pilot, lambda: app.engine.connected)
+        stopped = []
+        real_stop = app.engine.stop
+
+        async def stop():
+            stopped.append(1)
+            await real_stop()
+        app.engine.stop = stop
+        inp = app.query_one("#search-input")
+        inp.focus()
+        inp.value = "boards of canada"
+        inp.select_all()
+        await pilot.press("ctrl+c")              # selection: copy, don't quit
+        await pilot.pause(0.2)
+        assert app.is_running and not stopped
+        app.set_focus(None)
+        await pilot.press("ctrl+c")              # nothing selected: clean quit
+        await _wait(pilot, lambda: stopped)
+    assert stopped and app.return_code in (0, None)
+
+
+async def test_ctrl_c_twice_leaves_even_if_disconnect_hangs(cfg):
+    app = SlskApp(cfg, demo=True)
+    async with app.run_test(size=(160, 45)) as pilot:
+        await _wait(pilot, lambda: app.engine.connected)
+
+        async def hang():
+            await asyncio.sleep(3600)
+        app.engine.stop = hang
+        app.set_focus(None)
+        await pilot.press("ctrl+c")
+        await pilot.pause(0.3)
+        assert app.is_running                     # still saving/disconnecting
+        await pilot.press("ctrl+c")
+        await _wait(pilot, lambda: not app.is_running, timeout=3)
+
+
+def test_interrupt_outside_ui_prints_one_line(tmp_path):
+    import subprocess, sys
+    code = ("import slsk_reborn.cli as c\n"
+            "def boom(argv): raise KeyboardInterrupt\n"
+            "c._main = boom\nc.main([])\n")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 130
+    assert r.stderr.strip() == "slsk-reborn: interrupted"
+    assert "Traceback" not in r.stdout + r.stderr

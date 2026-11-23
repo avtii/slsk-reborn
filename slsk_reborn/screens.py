@@ -354,7 +354,7 @@ HELP = """\
   [b]1-5[/] / [b]F2-F6[/]  switch tab (Search, Transfers, Browse, Chat, Shares)
   [b]esc[/]          leave a text box so single-key shortcuts work
   [b]/[/] or [b]ctrl+f[/]  new search          [b]ctrl+t[/]  cycle theme
-  [b]ctrl+p[/]       command palette     [b]?[/]       this help        [b]ctrl+q[/]  quit
+  [b]ctrl+p[/]       command palette     [b]?[/]       this help        [b]ctrl+q[/] or [b]ctrl+c[/]  quit
   [b]ctrl+l[/]       lists: wishlist, friends, blocked users (block/friend also on any user card, [b]i[/])
   [b]ctrl+o[/]       tracklist: paste “Artist - Title” lines, every track is found and queued
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -49,6 +51,22 @@ def build_config(argv: list[str] | None = None) -> tuple[argparse.Namespace, Con
 
 
 def main(argv: list[str] | None = None) -> None:
+    try:
+        _main(argv)
+    except KeyboardInterrupt:
+        interrupted()
+
+
+def interrupted() -> None:
+    """ctrl+c outside the UI (starting up, shutting down): one line, no traceback."""
+    try:
+        sys.stderr.write("\nslsk-reborn: interrupted\n")
+        sys.stderr.flush()
+    finally:
+        os._exit(130)  # skip interpreter teardown, where a second ctrl+c would print a traceback
+
+
+def _main(argv: list[str] | None = None) -> None:
     a, cfg = build_config(argv)
 
     cfg.data_dir.mkdir(parents=True, exist_ok=True)

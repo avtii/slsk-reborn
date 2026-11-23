@@ -141,7 +141,7 @@ On the first start a login box opens. A Soulseek account is created automaticall
 | | `ctrl+l` | wishlist, friends, blocked users |
 | | `ctrl+o` | download a tracklist |
 | | `space` `←` `→` `-` `+` `<` `>` | player: pause, seek (also `[` `]`; shift = 1 min), volume, prev/next |
-| | `ctrl+q` | quit (saves transfers) |
+| | `ctrl+q` or `ctrl+c` | quit: saves transfers and logs out (`ctrl+c` copies instead when text is selected; press it again to leave without waiting) |
 | search results | `enter` / `d` | download file |
 | | `f` | download whole folder |
 | | `a` | album view on/off |

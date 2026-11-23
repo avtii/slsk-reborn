@@ -26,7 +26,8 @@ from .util import basename, human_speed
 
 log = logging.getLogger("slsk_reborn")
 
-ALT_WAIT = 12.0  # seconds of search results to collect when looking for another source
+ALT_WAIT = 12.0
+QUIT_WAIT = 5.0  # seconds to save transfers and log out before leaving anyway  # seconds of search results to collect when looking for another source
 
 TABS = [("search", "⌕ Search"), ("transfers", "⇅ Transfers"), ("browse", "◉ Browse"),
         ("chat", "✉ Chat"), ("shares", "▣ Shares")]
@@ -145,6 +146,8 @@ class SlskApp(App):
             self.register_theme(th)
         self.theme = self.cfg.theme if self.cfg.theme in {t.name for t in THEMES} else THEMES[0].name
         self.query_one(SearchPane).focus_input()
+        self._quitting = False
+        self._catch_signals()
         if self.demo or self.cfg.has_credentials:
             self.connect()
         else:
@@ -222,13 +225,34 @@ class SlskApp(App):
                         title="Nothing shared", severity="warning", timeout=10)
 
     async def action_quit(self) -> None:
-        self.notify("Saving transfers and disconnecting…")
-        self.player.close()
-        if not self.demo and abs(self.cfg.volume - self.player.volume) > 0.001:
-            self.cfg.volume = self.player.volume
-            self.cfg.save()
-        await self.engine.stop()
+        if self._quitting:  # pressed again while disconnecting: leave now
+            self.exit()
+            return
+        self._quitting = True
+        self.notify("Saving transfers and disconnecting… (ctrl+c again to leave now)")
+        try:
+            self.player.close()
+            if not self.demo and abs(self.cfg.volume - self.player.volume) > 0.001:
+                self.cfg.volume = self.player.volume
+                self.cfg.save()
+            await asyncio.wait_for(self.engine.stop(), QUIT_WAIT)
+        except Exception:  # a slow or broken disconnect must not keep the app open
+            log.warning("unclean shutdown", exc_info=True)
         self.exit()
+
+    def action_help_quit(self) -> None:
+        """ctrl+c (with no text selected to copy) quits like ctrl+q, cleanly."""
+        self.run_worker(self.action_quit(), exclusive=False)
+
+    def _catch_signals(self) -> None:
+        """SIGINT/SIGTERM from outside (kill, a closing terminal) also take the clean path."""
+        import signal
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, lambda: self.call_later(self.action_help_quit))
+            except (NotImplementedError, RuntimeError, ValueError):
+                pass  # Windows: console ctrl+c arrives as a key; main() catches the rest
 
     # ------------------------------------------------------------------ navigation
     def action_tab(self, tab: str) -> None:

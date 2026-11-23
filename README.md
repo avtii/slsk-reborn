@@ -20,7 +20,27 @@ A Soulseek client for the terminal, built on [Textual](https://textual.textualiz
 | **Chat** | **Shares & settings** |
 | ![chat](docs/chat.svg) | ![shares](docs/shares.svg) |
 
-## Install
+## Download
+
+Ready-to-run executables (no Python needed) are on the [Releases page](https://github.com/avtii/slsk-reborn/releases/latest):
+
+| System | File |
+|---|---|
+| Windows 10/11 (64-bit) | `slsk-reborn-windows-x64.exe` |
+| macOS, Apple Silicon (M1 and later) | `slsk-reborn-macos-arm64` |
+| macOS, Intel | `slsk-reborn-macos-x64` |
+
+Run them from a terminal: Windows Terminal on Windows, Terminal or iTerm2 on macOS.
+
+- **Windows:** SmartScreen may warn about an unknown publisher because the exe is not signed. Click *More info* → *Run anyway*.
+- **macOS:** the binary is not notarized. Make it executable and clear the quarantine flag once:
+  ```sh
+  chmod +x slsk-reborn-macos-arm64
+  xattr -d com.apple.quarantine slsk-reborn-macos-arm64
+  ./slsk-reborn-macos-arm64
+  ```
+
+## Install from source
 
 Requires Python 3.11 or newer.
 
@@ -89,7 +109,10 @@ Downloads go to `~/Music/slsk-reborn` by default. You can change this in the Sha
 ```sh
 pytest                       # UI tests run against the demo engine
 python docs/make_screenshots.py
+pip install pyinstaller && python packaging/build.py   # executable for this OS in dist/
 ```
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`. It builds the Windows and macOS executables, runs `--self-test` on each, and publishes them as a GitHub release.
 
 The UI talks only to an `Engine` interface (`slsk_reborn/engine.py`) through plain dataclasses and a small event bus. `SlskEngine` wraps aioslsk, and `DemoEngine` (`slsk_reborn/demo.py`) simulates the network for tests and screenshots.
 

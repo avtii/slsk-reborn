@@ -31,9 +31,10 @@ def build_config(argv: list[str] | None = None) -> tuple[argparse.Namespace, Con
     p.add_argument("--theme", choices=["slsk-neon", "slsk-amber", "slsk-matrix"])
     p.add_argument("--debug", action="store_true", help="verbose log in the data folder")
     p.add_argument("--version", action="version", version=f"slsk-reborn {__version__}")
+    p.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
     a = p.parse_args(argv)
 
-    if a.demo:
+    if a.demo or a.self_test:
         cfg = Config(path=Path(tempfile.gettempdir()) / "slsk-reborn-demo" / "config.toml",
                      username="you", password="demo")
     else:
@@ -55,8 +56,48 @@ def main(argv: list[str] | None = None) -> None:
     if not a.debug:
         logging.getLogger("aioslsk").setLevel(logging.WARNING)
 
+    if a.self_test:
+        raise SystemExit(self_test(cfg))
+
     from .app import SlskApp
     SlskApp(cfg, demo=a.demo).run()
+
+
+def self_test(cfg: Config) -> int:
+    """Headless smoke test for packaged builds: real-engine imports and settings
+    (no network), then a demo login, search and results."""
+    import asyncio
+    import importlib
+
+    from .app import SlskApp
+    from .engine import Bus, SlskEngine
+    from .panes.search import ResultsView
+
+    for mod in ("aioslsk.client", "aioslsk.events", "aioslsk.naming", "aioslsk.shares.cache",
+                "aioslsk.transfer.cache", "aioslsk.transfer.model", "aioslsk.commands", "aioslsk.protocol.primitives"):
+        importlib.import_module(mod)
+    SlskEngine(cfg, Bus())._settings()
+
+    async def run() -> int:
+        app = SlskApp(cfg, demo=True)
+        async with app.run_test(size=(140, 40)) as pilot:
+            for _ in range(100):
+                if app.engine.connected:
+                    break
+                await pilot.pause(0.05)
+            app.query_one("#search-input").value = "burial"
+            await pilot.press("enter")
+            for _ in range(100):
+                views = app.query(ResultsView)
+                if views and views.first().table.row_count:
+                    break
+                await pilot.pause(0.05)
+            n = app.query_one(ResultsView).table.row_count if app.query(ResultsView) else 0
+            await app.engine.stop()
+        print(f"slsk-reborn {__version__} self-test: {n} results", "OK" if n else "FAILED")
+        return 0 if n else 1
+
+    return asyncio.run(run())
 
 
 if __name__ == "__main__":

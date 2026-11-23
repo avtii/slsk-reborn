@@ -115,3 +115,16 @@ def test_config_roundtrip(tmp_path):
     c.save()
     d = Config.load(tmp_path / "c.toml")
     assert d.username == 'we"ird' and d.shared_dirs == [r"C:\a b", "/x"]
+
+
+def test_cli_port(tmp_path):
+    import pytest
+    from slsk_reborn.cli import build_config
+    cfg_path = tmp_path / "c.toml"
+    _, cfg = build_config(["--config", str(cfg_path), "--port", "2234"])
+    assert cfg.listen_port == 2234
+    _, cfg = build_config(["--config", str(cfg_path)])
+    assert cfg.listen_port == 61000
+    for bad in ("0", "65535", "abc"):
+        with pytest.raises(SystemExit):
+            build_config(["--config", str(cfg_path), "-p", bad])

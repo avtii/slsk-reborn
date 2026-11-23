@@ -10,10 +10,24 @@ from . import __version__
 from .config import HOME, Config
 
 
-def main(argv: list[str] | None = None) -> None:
+def port_number(text: str) -> int:
+    """Listening port; the next port up (port+1) is used for obfuscated connections."""
+    try:
+        n = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {text!r}") from None
+    if not 1 <= n <= 65534:
+        raise argparse.ArgumentTypeError("port must be 1-65534 (port+1 is used too)")
+    return n
+
+
+def build_config(argv: list[str] | None = None) -> tuple[argparse.Namespace, Config]:
     p = argparse.ArgumentParser(prog="slsk-reborn", description="Terminal Soulseek client.")
     p.add_argument("--config", type=Path, help=f"config file (default {HOME / 'config.toml'})")
     p.add_argument("--demo", action="store_true", help="offline demo network, nothing is sent anywhere")
+    p.add_argument("-p", "--port", type=port_number, metavar="N",
+                   help="listening port for peer connections, overrides the config for this run "
+                        "(default 61000; N+1 is used for obfuscated connections)")
     p.add_argument("--theme", choices=["slsk-neon", "slsk-amber", "slsk-matrix"])
     p.add_argument("--debug", action="store_true", help="verbose log in the data folder")
     p.add_argument("--version", action="version", version=f"slsk-reborn {__version__}")
@@ -26,6 +40,13 @@ def main(argv: list[str] | None = None) -> None:
         cfg = Config.load(a.config)
     if a.theme:
         cfg.theme = a.theme
+    if a.port:
+        cfg.listen_port = a.port
+    return a, cfg
+
+
+def main(argv: list[str] | None = None) -> None:
+    a, cfg = build_config(argv)
 
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(filename=cfg.data_dir / "slsk-reborn.log", encoding="utf-8",

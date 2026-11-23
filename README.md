@@ -42,6 +42,7 @@ pip install -e ".[dev]"
 slsk-reborn            # connect (asks for login on first start)
 slsk-reborn --demo     # offline demo with fake peers
 slsk-reborn --theme slsk-matrix
+slsk-reborn --port 2234  # listening port for this run (also uses 2235)
 python -m slsk_reborn  # same thing
 ```
 
@@ -80,7 +81,7 @@ Everything lives in `~/.slsk-reborn/` (set `SLSK_REBORN_HOME` to move it):
 
 Downloads go to `~/Music/slsk-reborn` by default. You can change this in the Shares tab.
 
-**Port:** the default listening port is `61000`. Forward it on your router, or enable UPnP, so that other peers can connect to you. If they can't, some uploads and downloads will fail to start.
+**Port:** the default listening port is `61000` (plus `61001` for obfuscated connections). Change it in the Shares tab or for a single run with `--port N` / `-p N`. Forward it on your router, or enable UPnP, so that other peers can connect to you. If they can't, some uploads and downloads will fail to start.
 
 ## Development
 

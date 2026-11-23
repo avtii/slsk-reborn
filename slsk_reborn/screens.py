@@ -215,7 +215,61 @@ HELP = """\
 [b $primary]Shares[/]
   [b]Browse…[/] picks a folder to share; it is scanned and announced. Settings save to
   ~/.slsk-reborn/config.toml and apply live.
+
+[b $primary]Sharing and ports[/]
+  Soulseek is a sharing network: share some music back, many users won't serve people
+  who share nothing. Peers connect to you on TCP port [b]N[/] and [b]N+1[/] (default 61000/61001,
+  change with [b]--port N[/]). If UPnP can't open them, forward both on your router.
 """
+
+
+WELCOME = """[b $primary]Soulseek runs on sharing.[/]
+Everything you download comes from someone else's shared folder. Please share
+some music back: many users only upload to people who share, and some ban
+users who share nothing.
+{share_line}
+
+[b $primary]Let other users reach you.[/]
+Peers connect to your computer on [b]TCP port {port}[/] (and [b]{port1}[/] for
+obfuscated connections). {upnp_line}
+If uploads never start or browsing you fails, forward [b]both ports[/] to this
+computer in your router settings (and allow them in your firewall).
+Use [b]--port N[/] to pick other ports.
+
+[dim]This is shown once. The same notes are in help ([b]?[/]).[/]
+"""
+
+
+class WelcomeScreen(ModalScreen[str | None]):
+    """First-run notes: sharing etiquette and the listening ports."""
+    BINDINGS = [Binding("escape", "dismiss(None)", "Close")]
+
+    def __init__(self, port: int, upnp: bool, shared_files: int):
+        super().__init__()
+        self.port, self.upnp, self.shared_files = port, upnp, shared_files
+
+    def compose(self) -> ComposeResult:
+        share_line = (f"You share [b]{self.shared_files:,}[/] files right now."
+                      if self.shared_files else "[b $warning]You don't share any files yet.[/]")
+        upnp_line = ("UPnP is on, so the app asks your router to open them automatically;"
+                     " not every router allows that." if self.upnp else
+                     "UPnP is off, so the router won't open them for you.")
+        text = WELCOME.format(port=self.port, port1=self.port + 1, share_line=share_line,
+                              upnp_line=upnp_line)
+        with Vertical(id="welcome-box", classes="modal-box"):
+            yield Center(Static(logo(), id="help-logo"))
+            yield Static(text, markup=True, id="welcome-text")
+            with Horizontal(id="welcome-buttons"):
+                yield Button("Share a folder…", variant="primary", id="welcome-share")
+                yield Button("Got it", id="welcome-ok")
+
+    @on(Button.Pressed, "#welcome-share")
+    def share(self) -> None:
+        self.dismiss("share")
+
+    @on(Button.Pressed, "#welcome-ok")
+    def ok(self) -> None:
+        self.dismiss(None)
 
 
 class HelpScreen(ModalScreen[None]):

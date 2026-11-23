@@ -174,18 +174,43 @@ class TransfersPane(Vertical):
         yield TransferTable(True, id="uploads")
 
     def on_mount(self) -> None:
+        self._states: dict[tuple, str] | None = None  # None until the first refresh
+        self._finished_batch = 0
         self.set_interval(0.5, self.refresh_data)
         self.refresh_data()
 
     def refresh_data(self) -> None:
         xs = self.app.engine.transfers()
         downs = [x for x in xs if not x.upload]
+        self._announce(downs)
         ups = [x for x in xs if x.upload]
         self.query_one("#downloads", TransferTable).sync(downs)
         self.query_one("#uploads", TransferTable).sync(ups)
         d, u = self.app.engine.speeds()
         self.query_one("#dl-title", Static).update(self._title("▼ Downloads", downs, d, "#00e5ff"))
         self.query_one("#ul-title", Static).update(self._title("▲ Uploads", ups, u, "#ff2bd6"))
+
+    def _announce(self, downs: list[Xfer]) -> None:
+        """Toast finished/failed downloads; ring the bell once when the queue empties."""
+        states = {x.key: x.state for x in downs}
+        prev, self._states = self._states, states
+        if prev is None or not self.app.cfg.notify_downloads:
+            return  # don't announce transfers restored from the last session
+        done = [x for x in downs if x.state == "done" and prev.get(x.key, "done") != "done"]
+        failed = [x for x in downs if x.state == "failed" and prev.get(x.key, "failed") != "failed"]
+        self._finished_batch += len(done)
+        if len(done) == 1:
+            self.app.notify(basename(done[0].path), title="✔ Downloaded", timeout=4)
+        elif done:
+            self.app.notify(f"{len(done)} files", title="✔ Downloaded", timeout=4)
+        for x in failed[:3]:
+            self.app.notify(f"{basename(x.path)}: {x.reason or 'failed'}", title="✖ Download failed",
+                            severity="warning", timeout=6)
+        if self._finished_batch and not any(x.active for x in downs):
+            n, self._finished_batch = self._finished_batch, 0
+            self.app.bell()
+            self.app.notify(f"{n} file{'s' if n != 1 else ''} in {short_dir(self.app.cfg.download_dir)}",
+                            title="All downloads finished", timeout=8)
 
     @staticmethod
     def _title(name: str, xs: list[Xfer], speed: float, color: str) -> Text:

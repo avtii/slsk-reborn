@@ -14,7 +14,7 @@ from . import __version__
 from .config import Config
 from .engine import Bus, Engine, FileEntry, SlskEngine
 from .panes import BrowsePane, ChatPane, SearchPane, SharesPane, TransfersPane
-from .screens import HelpScreen, LoginScreen, RoomListScreen, UserInfoScreen
+from .screens import HelpScreen, LoginScreen, RoomListScreen, UserInfoScreen, WelcomeScreen
 from .theme import THEMES, mini_logo
 from .util import human_speed
 
@@ -155,6 +155,30 @@ class SlskApp(App):
         self.query_one(SharesPane).refresh_table()
         for room in list(self.cfg.auto_join_rooms):
             self.query_one(ChatPane).join(room)
+        self.first_run_notes()
+
+    def first_run_notes(self) -> None:
+        """Once: explain sharing and ports. Later: remind if nothing is shared."""
+        if self.demo:
+            return
+        files = self.engine.share_stats()[1]
+        if not self.cfg.welcomed:
+            self.cfg.welcomed = True
+            self.cfg.save()
+
+            def done(choice):
+                if choice == "share":
+                    self.action_tab("shares")
+                    self.query_one(SharesPane).browse_for_share()
+
+            self.push_screen(WelcomeScreen(self.cfg.listen_port, self.cfg.upnp, files), done)
+        else:
+            self.set_timer(30, self._remind_if_nothing_shared)  # after the startup scan
+
+    def _remind_if_nothing_shared(self) -> None:
+        if self.engine.connected and not self.engine.share_stats()[1]:
+            self.notify("You share no files. Soulseek works by sharing: add a folder in Shares (5).",
+                        title="Nothing shared", severity="warning", timeout=10)
 
     async def action_quit(self) -> None:
         self.notify("Saving transfers and disconnecting…")

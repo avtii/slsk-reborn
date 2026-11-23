@@ -1,8 +1,12 @@
 name: release
 
-# Push a tag like v0.2.0 to build Windows and macOS executables and attach
-# them to a GitHub release. "Run workflow" on the Actions tab builds without
-# releasing (the binaries are kept as workflow artifacts).
+# Push a tag like v0.3.0 to build Windows, macOS and Linux executables and
+# attach them to a GitHub release. "Run workflow" on the Actions tab builds
+# without releasing (the binaries are kept as workflow artifacts).
+#
+# PyPI: the `pypi` job runs only when the repository variable PYPI_PUBLISH is
+# "true" (Settings -> Secrets and variables -> Actions -> Variables), after the
+# trusted publisher is registered on pypi.org. See RELEASING.md.
 on:
   push:
     tags: ["v*"]
@@ -16,11 +20,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, macos-15-intel]
+        os: [windows-latest, macos-latest, macos-15-intel, ubuntu-latest, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Install
@@ -37,17 +41,34 @@ jobs:
           exe=$(ls dist/slsk-reborn-*)
           "$exe" --version
           "$exe" --self-test
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.os }}
           path: dist/slsk-reborn-*
 
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build --outdir pkg
+          twine check pkg/*
+      - uses: actions/upload-artifact@v7
+        with:
+          name: python-package
+          path: pkg/*
+
   release:
-    needs: build
+    needs: [build, sdist]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -58,3 +79,21 @@ jobs:
           ls -l dist
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
             --title "slsk-reborn $GITHUB_REF_NAME" --generate-notes
+
+  pypi:
+    needs: [build, sdist]
+    if: startsWith(github.ref, 'refs/tags/v') && vars.PYPI_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/slsk-reborn
+    permissions:
+      id-token: write  # trusted publishing, no token stored in the repo
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: python-package
+          path: pkg
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: pkg

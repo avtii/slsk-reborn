@@ -208,3 +208,26 @@ async def test_folder_picker_adds_share(cfg, tmp_path):
         pane.add_share(str(music))
         await pilot.pause(0.2)
         assert cfg.shared_dirs.count(str(music)) == 1
+
+
+async def test_welcome_and_download_notices(cfg):
+    from slsk_reborn.screens import WelcomeScreen
+    app = SlskApp(cfg, demo=True)
+    async with app.run_test(size=(160, 45)) as pilot:
+        await _wait(pilot, lambda: app.engine.connected)
+        # first-run notes (skipped in demo mode, so pretend we're live)
+        app.demo = False
+        app.first_run_notes()
+        await _wait(pilot, lambda: isinstance(app.screen, WelcomeScreen) and app.screen.query("#welcome-text"))
+        text = str(app.screen.query_one("#welcome-text").render())
+        assert "61000" in text and "61001" in text and "sharing" in text
+        assert Config.load(cfg.path).welcomed
+        await pilot.click("#welcome-ok")
+        app.demo = True
+
+        # a finished download toasts; the bell rings once the queue is empty
+        rings = []
+        app.bell = lambda: rings.append(1)
+        await app.engine.download("flac_monk", r"Music\A\01 - x.flac", 1000)
+        await _wait(pilot, lambda: rings, timeout=30)
+        assert any("All downloads finished" in (n.title or "") for n in app._notifications)

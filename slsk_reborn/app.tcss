@@ -337,7 +337,7 @@ ListView > ListItem.-highlight {
 
 /* ------------------------------------------------------------- modals */
 
-LoginScreen, UserInfoScreen, RoomListScreen, HelpScreen {
+LoginScreen, UserInfoScreen, RoomListScreen, HelpScreen, WelcomeScreen {
     align: center middle;
     background: $background 70%;
 }
@@ -479,4 +479,21 @@ FolderPickerScreen {
 
 Footer {
     background: $panel;
+}
+
+#welcome-box {
+    width: 86;
+    height: auto;
+    max-height: 90%;
+    padding: 1 3;
+}
+
+#welcome-buttons {
+    height: auto;
+    align: center middle;
+    margin-top: 1;
+}
+
+#welcome-buttons Button {
+    margin: 0 1;
 }

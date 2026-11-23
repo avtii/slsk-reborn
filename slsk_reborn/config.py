@@ -27,6 +27,8 @@ class Config:
     search_timeout: int = 0
     min_bitrate: int = 0
     theme: str = "slsk-neon"
+    welcomed: bool = False  # first-run sharing/ports notes were shown
+    notify_downloads: bool = True  # toast per finished file, bell when the queue empties
     friends: list[str] = field(default_factory=list)
     blocked: list[str] = field(default_factory=list)
     wishlist: list[str] = field(default_factory=list)

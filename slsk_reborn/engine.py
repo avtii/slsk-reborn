@@ -177,6 +177,31 @@ _STATE_NAMES = {
 }
 
 
+def _directory_command(user: str, folder: str):
+    """PeerGetDirectoryContentCommand with its ticket picked up front.
+
+    aioslsk 1.7.2 builds the expected-reply filter before send(), but this
+    command only picks its ticket inside send(), so the filter waits for
+    ticket None and every folder request times out. Pick it first.
+    """
+    from aioslsk.commands import PeerGetDirectoryContentCommand
+    from aioslsk.protocol.messages import PeerDirectoryContentsRequest
+
+    class Cmd(PeerGetDirectoryContentCommand):
+        def build_expected_response(self, client):
+            if self._ticket is None:
+                self._ticket = next(client.ticket_generator)
+            return super().build_expected_response(client)
+
+        async def send(self, client):
+            if self._ticket is None:
+                self._ticket = next(client.ticket_generator)
+            await client.network.send_peer_messages(
+                self.username, PeerDirectoryContentsRequest.Request(self._ticket, self.directory))
+
+    return Cmd(user, folder)
+
+
 class SlskEngine(Engine):
     def __init__(self, cfg: Config, bus: Bus):
         super().__init__(cfg, bus)
@@ -350,12 +375,17 @@ class SlskEngine(Engine):
         await self.client.transfers.download(user, path)
 
     async def download_folder(self, user: str, folder: str) -> int:
-        from aioslsk.commands import PeerGetDirectoryContentCommand
-        dirs = await self.client(PeerGetDirectoryContentCommand(user, folder), response=True, timeout=60)
+        from aioslsk.transfer.model import TransferDirection
+        dirs = await self.client(_directory_command(user, folder), response=True, timeout=60)
+        have = {(t.username, t.remote_path) for t in self.client.transfers.transfers
+                if t.direction == TransferDirection.DOWNLOAD
+                and _STATE_NAMES.get(t.state.VALUE.name) not in ("failed", "aborted")}
         n = 0
         for d in dirs or []:
             for f in d.files:
                 full = f.filename if ("\\" in f.filename or "/" in f.filename) else f"{d.name}\\{f.filename}"
+                if (user, full) in have:
+                    continue  # already downloaded or on its way
                 await self.client.transfers.download(user, full)
                 n += 1
         return n

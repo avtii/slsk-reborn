@@ -46,6 +46,16 @@ def build_config(argv: list[str] | None = None) -> tuple[argparse.Namespace, Con
     return a, cfg
 
 
+def _omit_authentication(record: logging.LogRecord) -> bool:
+    from aioslsk.protocol.messages import Login, NewPassword
+
+    sensitive = (Login.Request, Login.Response, NewPassword.Request)
+    if getattr(record, "message_type", None) in sensitive:
+        return False
+    # Connection warnings and serialization errors can omit message_type.
+    return not any(isinstance(arg, sensitive) for arg in record.args or ())
+
+
 def main(argv: list[str] | None = None) -> None:
     a, cfg = build_config(argv)
 
@@ -53,6 +63,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(filename=cfg.data_dir / "slsk-reborn.log", encoding="utf-8",
                         level=logging.DEBUG if a.debug else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("aioslsk.network.connection").addFilter(_omit_authentication)
     if not a.debug:
         logging.getLogger("aioslsk").setLevel(logging.WARNING)
 

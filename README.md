@@ -66,7 +66,7 @@ slsk-reborn --port 2234  # listening port for this run (also uses 2235)
 python -m slsk_reborn  # same thing
 ```
 
-On the first start a login box opens. A Soulseek account is created automatically the first time you log in with a new name. **Use a different account from any other Soulseek client you run.** The server allows only one session per name, so two clients on the same account keep kicking each other off.
+Use a dedicated Soulseek password. The native server login sends credentials over a plain TCP connection. On the first start a login box opens. A Soulseek account is created automatically the first time you log in with a new name. **Use a different account from any other Soulseek client you run.** The server allows only one session per name, so two clients on the same account keep kicking each other off.
 
 ![login](docs/login.svg)
 
@@ -98,7 +98,7 @@ Everything lives in `~/.slsk-reborn/` (set `SLSK_REBORN_HOME` to move it):
 
 - `config.toml`: account, folders, limits, theme, rooms. It is written with `chmod 600` because it holds your password.
 - `shares/` and `transfers/`: caches, so the shares index and the transfer queue survive restarts.
-- `slsk-reborn.log`: run with `--debug` for full protocol logging.
+- `slsk-reborn.log`: run with `--debug` for protocol diagnostics. Authentication messages are excluded. Logs can still contain private conversations and filenames. Older debug logs can contain your password.
 
 Downloads go to `~/Music/slsk-reborn` by default. You can change this in the Shares tab.
 

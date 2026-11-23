@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import tomllib
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
@@ -62,13 +63,13 @@ class Config:
         lines = ["# slsk-reborn configuration", ""]
         for k, v in data.items():
             lines.append(f"{k} = {_toml(v)}")
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        os.replace(tmp, self.path)
+        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=f".{self.path.name}.")
         try:
-            os.chmod(self.path, 0o600)
-        except OSError:
-            pass
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write("\n".join(lines) + "\n")
+            os.replace(tmp, self.path)
+        finally:
+            Path(tmp).unlink(missing_ok=True)
 
 
 def _toml(v) -> str:

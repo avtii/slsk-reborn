@@ -96,7 +96,7 @@ The filter box above the results takes words to include, `-word` to exclude, `fl
 
 Everything lives in `~/.slsk-reborn/` (set `SLSK_REBORN_HOME` to move it):
 
-- `config.toml`: account, folders, limits, theme, rooms. It is written with `chmod 600` because it holds your password.
+- `config.toml`: account, folders, limits, theme, rooms. On POSIX systems the file is created with owner-only permissions because it holds your password.
 - `shares/` and `transfers/`: caches, so the shares index and the transfer queue survive restarts.
 - `slsk-reborn.log`: run with `--debug` for full protocol logging.
 

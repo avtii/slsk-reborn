@@ -354,11 +354,11 @@ class SlskApp(App):
         self.query_one(PlayerBar).tick()
 
     # ------------------------------------------------------------------ actions used by panes
-    def start_download(self, user: str, path: str, size: int = 0) -> None:
+    def start_download(self, user: str, path: str, size: int | None = None) -> None:
         self._download(user, path, size)
 
     @work
-    async def _download(self, user: str, path: str, size: int) -> None:
+    async def _download(self, user: str, path: str, size: int | None) -> None:
         try:
             await self.engine.download(user, path, size)
         except Exception as e:

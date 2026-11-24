@@ -181,7 +181,7 @@ class Engine:
     def stop_search(self, ticket: int) -> None: ...
 
     # transfers
-    async def download(self, user: str, path: str, size: int = 0) -> None: ...
+    async def download(self, user: str, path: str, size: int | None = None) -> None: ...
     async def download_folder(self, user: str, folder: str) -> int: ...
     def transfers(self) -> list[Xfer]: ...
     async def pause(self, key: tuple) -> None: ...
@@ -472,8 +472,8 @@ class SlskEngine(Engine):
                 pass
 
     # ------------------------------------------------------------------ transfers
-    async def download(self, user: str, path: str, size: int = 0) -> None:
-        await self.client.transfers.download(user, path)
+    async def download(self, user: str, path: str, size: int | None = None) -> None:
+        await self.client.transfers.download(user, path, expected_size=size)
 
     async def download_folder(self, user: str, folder: str) -> int:
         from aioslsk.transfer.model import TransferDirection

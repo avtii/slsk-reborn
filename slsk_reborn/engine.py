@@ -346,7 +346,7 @@ class SlskEngine(Engine):
         )
 
     async def start(self) -> None:
-        from aioslsk.client import SoulSeekClient
+        from .transfer_sizes import DownloadClient
         from aioslsk.events import (PrivateMessageEvent, RoomJoinedEvent, RoomLeftEvent,
                                     RoomMessageEvent, ScanCompleteEvent, SearchRequestReceivedEvent,
                                     SearchResultEvent,
@@ -358,7 +358,7 @@ class SlskEngine(Engine):
         data = self.cfg.data_dir
         data.mkdir(parents=True, exist_ok=True)
 
-        self.client = SoulSeekClient(self._settings(),
+        self.client = DownloadClient(self._settings(),
                                      shares_cache=SharesShelveCache(str(data)),
                                      transfer_cache=TransferShelveCache(str(data)))
         self.client.shares.naming_strategies = _naming_strategies()

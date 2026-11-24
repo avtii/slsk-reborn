@@ -236,9 +236,15 @@ class SlskApp(App):
             log.warning("could not save the open searches", exc_info=True)
         try:
             self.player.close()
+        except Exception:
+            log.warning("could not close the player", exc_info=True)
+        try:
             if not self.demo and abs(self.cfg.volume - self.player.volume) > 0.001:
                 self.cfg.volume = self.player.volume
                 self.cfg.save()
+        except Exception:
+            log.warning("could not save the playback volume", exc_info=True)
+        try:
             await asyncio.wait_for(self.engine.stop(), QUIT_WAIT)
         except Exception:  # a slow or broken disconnect must not keep the app open
             log.warning("unclean shutdown", exc_info=True)

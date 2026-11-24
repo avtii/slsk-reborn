@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import itertools
 import json
-import os
 import re
 import time
 from collections import Counter
@@ -16,6 +15,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Checkbox, DataTable, Input, Static, TabbedContent, TabPane
 
+from ..config import write_private_text
 from ..engine import Hit
 from ..util import (LOSSLESS, basename, dirname, human_duration, human_size, human_speed, quality_text,
                     short_dir, split_path, user_color)
@@ -527,11 +527,8 @@ class SearchPane(Vertical):
                 active = len(out)
             hits = (v.hits + v.pending)[:SAVED_HITS]
             out.append({"query": v.query_text, "hits": [asdict(h) for h in hits]})
-        f = self.session_file
-        f.parent.mkdir(parents=True, exist_ok=True)
-        tmp = f.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"version": 1, "active": active, "searches": out}), encoding="utf-8")
-        os.replace(tmp, f)
+        data = {"version": 1, "active": active, "searches": out}
+        write_private_text(self.session_file, json.dumps(data))
 
     @work
     async def restore_session(self) -> None:

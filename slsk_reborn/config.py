@@ -60,19 +60,24 @@ class Config:
         return cfg
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         data = asdict(self)
         data.pop("path", None)
         lines = ["# slsk-reborn configuration", ""]
         for k, v in data.items():
             lines.append(f"{k} = {_toml(v)}")
-        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=f".{self.path.name}.")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                stream.write("\n".join(lines) + "\n")
-            os.replace(tmp, self.path)
-        finally:
-            Path(tmp).unlink(missing_ok=True)
+        write_private_text(self.path, "\n".join(lines) + "\n")
+
+
+def write_private_text(path: Path, contents: str) -> None:
+    """Replace a UTF-8 file atomically, with owner-only permissions on POSIX."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(contents)
+        os.replace(tmp, path)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
 
 
 def _toml(v) -> str:

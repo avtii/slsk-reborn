@@ -39,7 +39,7 @@ def build_config(argv: list[str] | None = None) -> tuple[argparse.Namespace, Con
     a = p.parse_args(argv)
 
     if a.demo or a.self_test:
-        cfg = Config(path=Path(tempfile.gettempdir()) / "slsk-reborn-demo" / "config.toml",
+        cfg = Config(path=HOME / ("self-test" if a.self_test else "demo") / "config.toml",
                      username="you", password="demo")
     else:
         cfg = Config.load(a.config)
@@ -100,14 +100,14 @@ def _player_self_test() -> None:
     import wave
 
     import miniaudio
-    path = Path(tempfile.gettempdir()) / "slsk-reborn-selftest.wav"
-    with wave.open(str(path), "wb") as w:
-        w.setnchannels(2)
-        w.setsampwidth(2)
-        w.setframerate(44100)
-        w.writeframes(struct.pack("<h", 1000) * 2 * 4410)
-    decoded = miniaudio.decode_file(str(path))
-    path.unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory(prefix="slsk-reborn-audio-") as directory:
+        path = Path(directory) / "test.wav"
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(2)
+            w.setsampwidth(2)
+            w.setframerate(44100)
+            w.writeframes(struct.pack("<h", 1000) * 2 * 4410)
+        decoded = miniaudio.decode_file(str(path))
     assert decoded.num_frames == 4410, decoded.num_frames
 
 

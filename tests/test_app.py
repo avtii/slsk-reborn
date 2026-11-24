@@ -579,7 +579,11 @@ async def test_open_searches_come_back_after_quit(cfg):
         app.set_focus(None)
         await pilot.press("ctrl+q")
         await _wait(pilot, lambda: not app.is_running)
+    import os
+    import stat
     saved = cfg.data_dir / "searches-demo.json"
+    if os.name == "posix":
+        assert stat.S_IMODE(saved.stat().st_mode) == 0o600
     assert saved.exists() and not (cfg.data_dir / "searches.json").exists()   # demo never touches the real file
 
     app = SlskApp(cfg, demo=True)

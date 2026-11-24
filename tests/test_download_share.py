@@ -39,6 +39,8 @@ async def test_save_applies_download_share_checkbox(tmp_path):
     cfg = Config(path=tmp_path / "config.toml", download_dir=str(tmp_path / "music"))
     app = SlskApp(cfg, demo=True)
     async with app.run_test(size=(160, 45)) as pilot:
+        # The connection worker refreshes the shares pane after the demo logs in.
+        await app.workers.wait_for_complete()
         app.query_one("#main").active = "shares"
         checkbox = app.query_one("#set-sharedl")
         for desired in (False, True):

@@ -111,7 +111,7 @@ class DemoEngine(Engine):
         self._stopped.add(ticket)
 
     # transfers
-    async def download(self, user, path, size=0):
+    async def download(self, user, path, size=None):
         key = (user, path, 0)
         if key in self._xfers and self._xfers[key].active:
             return

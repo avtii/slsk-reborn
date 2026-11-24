@@ -60,3 +60,38 @@ def test_pick_prefers_lossless_and_free_slots():
     assert pick([mp3, flac, busy_flac], t)[0] is flac
     assert pick([mp3, flac], t, prefer_lossless=False)[0] is not None
     assert pick([_h(r"x\Near Dark.mp3")], t) == (None, float("-inf"))
+
+
+def test_auto_pick_requires_the_filename_to_match_the_audio_format():
+    t = Track(1, "Burial", "Archangel")
+    for path in ("Music/Burial/Archangel.txt", "Music/Burial/Archangel", "Music/Burial/Archangel.wav"):
+        assert pick([_h(path, ext="mp3")], t)[0] is None
+    actual = _h("Music/Burial/Archangel.MP3")
+    assert pick([actual], t)[0] is actual
+
+
+async def test_failed_search_can_be_retried(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from slsk_reborn.app import SlskApp
+    from slsk_reborn.config import Config
+    from slsk_reborn.panes.search import SearchPane
+    from slsk_reborn.panes.tracklist import TracklistView
+
+    app = SlskApp(Config(path=tmp_path / "config.toml"), demo=True)
+    async with app.run_test() as pilot:
+        await pilot.pause(0.3)
+        search = AsyncMock(side_effect=[ConnectionError("offline"), 123])
+        monkeypatch.setattr(app.engine, "search", search)
+        monkeypatch.setattr("slsk_reborn.panes.tracklist.SEARCH_WAIT", 0)
+        await app.query_one(SearchPane).open_tracklist([Track(1, "Example", "Song")], True, "list").wait()
+        view = app.query_one(TracklistView)
+        row = view.rows[0]
+        await row.task
+        assert (row.state, row.note) == ("failed", "ConnectionError")
+        search.side_effect = None
+        search.return_value = 123
+        view.action_retry()
+        await row.task
+        assert row.state == "not found"
+        assert search.await_count >= 2

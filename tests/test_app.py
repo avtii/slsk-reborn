@@ -561,30 +561,37 @@ def test_interrupt_outside_ui_prints_one_line(tmp_path):
 
 
 async def test_open_searches_come_back_after_quit(cfg):
+    from textual.events import Key
+
+    async def quit_app(app):
+        # Pilot.press also waits for animations, which may stop during shutdown.
+        app.set_focus(None)
+        app.post_message(Key("ctrl+q", None))
+        async with asyncio.timeout(8):
+            while app.is_running:
+                await asyncio.sleep(0.01)
+
     hits = [Hit(f"u{i % 4}", rf"@@s\Music\Album {i}\track {i}.flac", 1000 + i, "flac", None, 200, 44100,
                 bool(i % 2), 0, 500) for i in range(30)]
     app = SlskApp(cfg, demo=True)
     async with app.run_test(size=(160, 45)) as pilot:
         await _wait(pilot, lambda: app.engine.connected)
-        for q in ("zzqq one", "zzqq two"):
+        for count, q in enumerate(("zzqq one", "zzqq two"), start=1):
             app.query_one("#search-input").focus()
             await pilot.press(*q, "enter")
-            await _wait(pilot, lambda: len(app.query(ResultsView)) == (1 if q.endswith("one") else 2))
+            await _wait(pilot, lambda: len(app.query_one("SearchPane").views) == count)
         one, two = app.query(ResultsView)
-        await _wait(pilot, lambda: one.ticket is not None and two.ticket is not None)
         one.add_hits(hits)
         await _wait(pilot, lambda: one.table.row_count >= 30)
         pane = app.query_one("SearchPane")
         pane.query_one("TabbedContent").active = one.parent.id   # the first tab is the one in view
-        app.set_focus(None)
-        await pilot.press("ctrl+q")
-        await _wait(pilot, lambda: not app.is_running)
+        await quit_app(app)
     saved = cfg.data_dir / "searches-demo.json"
     assert saved.exists() and not (cfg.data_dir / "searches.json").exists()   # demo never touches the real file
 
     app = SlskApp(cfg, demo=True)
     async with app.run_test(size=(160, 45)) as pilot:
-        await _wait(pilot, lambda: len(app.query(ResultsView)) == 2)
+        await _wait(pilot, lambda: len(app.query_one("SearchPane").restored) == 2)
         one, two = app.query(ResultsView)
         assert [one.query_text, two.query_text] == ["zzqq one", "zzqq two"]
         assert one.restored and not one.running and one.query_one(".stop-btn").disabled
@@ -595,15 +602,13 @@ async def test_open_searches_come_back_after_quit(cfg):
         await _wait(pilot, lambda: app.engine.connected)
         one.table.focus()
         await pilot.press("r")                               # search again: a live tab replaces the saved one
-        await _wait(pilot, lambda: [v.query_text for v in app.query(ResultsView) if v.running] == ["zzqq one"])
+        await _wait(pilot, lambda: [v.query_text for v in app.query_one("SearchPane").views.values()] == ["zzqq one"])
         assert all(v is not one for v in app.query(ResultsView))
         for v in list(app.query(ResultsView)):
             app.query_one("SearchPane").close_search(v)
-        await pilot.pause(0.2)
+        await _wait(pilot, lambda: not app.query(ResultsView))
         assert app.query_one("#search-empty").display       # no tabs left: the empty hint is back
-        app.set_focus(None)
-        await pilot.press("ctrl+q")
-        await _wait(pilot, lambda: not app.is_running)
+        await quit_app(app)
     import json
     assert json.loads(saved.read_text(encoding="utf-8"))["searches"] == []   # closed tabs stay closed
 

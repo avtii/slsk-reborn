@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from .engine import Hit
-from .util import LOSSLESS, basename
+from .util import LOSSLESS, basename, ext_of
 
 TS_RE = re.compile(r"[\[(]?\b(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\b[\])]?")
 NUM_RE = re.compile(r"^\s*(?:#|no\.?\s*)?\d{1,3}\s*[.)\]:]\s*|^\s*0\d\s+(?=\S)", re.I)  # keeps "50 Cent"
@@ -114,7 +114,7 @@ def queries_for(t: Track) -> list[str]:
 
 def score(h: Hit, t: Track, prefer_lossless: bool = True) -> Optional[float]:
     """None = not this track (or unusable); higher = better pick."""
-    if h.locked or h.ext not in AUDIO_SCORE or h.size < 1_000_000:
+    if h.locked or h.ext not in AUDIO_SCORE or ext_of(h.path) != h.ext or h.size < 1_000_000:
         return None
     path_tokens = set(norm(h.path).split())
     stem = basename(h.path).rsplit(".", 1)[0]

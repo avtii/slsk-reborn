@@ -13,7 +13,6 @@ from textual.containers import Vertical
 from textual.widgets import DataTable, Static
 
 from ..engine import Xfer
-from ..fallback import norm_name
 from ..util import bar, basename, eta, human_size, human_speed, short_dir, user_color
 
 STATE_STYLE = {
@@ -211,7 +210,6 @@ class TransfersPane(Vertical):
 
     def on_mount(self) -> None:
         self._states: dict[tuple, str] | None = None  # None until the first refresh
-        self._fallback_tried: set[str] = set()
         self._finished_batch = 0
         self.set_interval(0.5, self.refresh_data)
         self.refresh_data()
@@ -235,10 +233,12 @@ class TransfersPane(Vertical):
             return  # don't announce transfers restored from the last session
         done = [x for x in downs if x.state == "done" and prev.get(x.key) != "done"]
         failed = [x for x in downs if x.state == "failed" and prev.get(x.key) != "failed"]
+        attempted = self.app.auto_fallback_tried
+        attempted.intersection_update(states)
         if self.app.cfg.auto_fallback:
             for x in failed:
-                if norm_name(x.path) not in self._fallback_tried:  # one automatic hop per track
-                    self._fallback_tried.add(norm_name(x.path))
+                if x.key not in attempted:
+                    attempted.add(x.key)
                     self.app.find_alternative(x, auto=True)
         if not self.app.cfg.notify_downloads:
             return

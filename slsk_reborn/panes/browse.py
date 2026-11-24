@@ -9,7 +9,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Input, LoadingIndicator, Static, Tree
 from textual.widgets.tree import TreeNode
 
-from ..engine import FileEntry, Folder
+from ..engine import FileEntry, Folder, folder_batch
 from ..util import basename, human_duration, human_size, quality_text, split_path
 
 
@@ -170,7 +170,12 @@ class BrowsePane(Vertical):
             p = "\\".join(split_path(path))
             return not key or p == key or p.startswith(key + "\\")
 
-        files = [x for path, f in self.folders.items() if not f.locked and inside(path) for x in f.files]
+        try:
+            files = folder_batch(x for path, f in self.folders.items() if not f.locked and inside(path)
+                                 for x in f.files)
+        except ValueError as exc:
+            self.notify(str(exc), severity="warning")
+            return
         if not files:
             self.notify("No downloadable files in that folder.", severity="warning")
             return

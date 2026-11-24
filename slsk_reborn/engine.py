@@ -11,6 +11,7 @@ import logging
 import os
 import time
 from collections import defaultdict
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -45,6 +46,42 @@ class FileEntry:
     ext: str
     bitrate: Optional[int] = None
     duration: Optional[int] = None
+
+
+MAX_FOLDER_FILES = 1_000
+MAX_FOLDER_BYTES = 32 * 1024 ** 3
+
+
+def _listed_path(directory: str, filename: str) -> str | None:
+    """Accept a leaf or an already-qualified direct member of the listed folder."""
+    directory = directory.replace("/", "\\").rstrip("\\")
+    path = filename.replace("/", "\\")
+    if not path or path.endswith("\\"):
+        return None
+    if "\\" in path:
+        if path.rpartition("\\")[0] != directory:
+            return None
+    else:
+        path = f"{directory}\\{path}" if directory else path
+    if any(part in (".", "..") for part in path.split("\\")):
+        return None
+    return path
+
+
+def folder_batch(files: Iterable[FileEntry]) -> list[FileEntry]:
+    """Validate the whole selection before submitting any queue entries."""
+    selected: dict[str, FileEntry] = {}
+    total = 0
+    for entry in files:
+        if entry.path in selected:
+            if entry.size != selected[entry.path].size:
+                raise ValueError("Conflicting sizes for a file in this folder")
+            continue
+        total += entry.size
+        if len(selected) >= MAX_FOLDER_FILES or total > MAX_FOLDER_BYTES:
+            raise ValueError(f"Select a smaller folder (maximum {MAX_FOLDER_FILES:,} files or 32 GiB)")
+        selected[entry.path] = entry
+    return list(selected.values())
 
 
 @dataclass
@@ -297,7 +334,7 @@ class SlskEngine(Engine):
                 limits=NetworkLimitSettings(upload_speed_kbps=c.upload_limit_kbps,
                                             download_speed_kbps=c.download_limit_kbps)),
             searches=SearchSettings(
-                send=SearchSendSettings(request_timeout=c.search_timeout),
+                send=SearchSendSettings(request_timeout=c.search_timeout, store_results=False),
                 receive=SearchReceiveSettings(max_results=100),
                 wishlist=[WishlistSettingEntry(query=q) for q in c.wishlist]),
             shares=SharesSettings(download=c.download_dir,
@@ -441,18 +478,29 @@ class SlskEngine(Engine):
     async def download_folder(self, user: str, folder: str) -> int:
         from aioslsk.transfer.model import TransferDirection
         dirs = await self.client(_directory_command(user, folder), response=True, timeout=60)
-        have = {(t.username, t.remote_path) for t in self.client.transfers.transfers
-                if t.direction == TransferDirection.DOWNLOAD
+        selected = folder.replace("/", "\\").rstrip("\\")
+        batch = folder_batch(
+            entry for directory in dirs or []
+            if directory.name.replace("/", "\\").rstrip("\\") == selected
+            for entry in self._listed_files(directory)
+        )
+        have = {t.remote_path.replace("/", "\\") for t in self.client.transfers.transfers
+                if t.username == user and t.direction == TransferDirection.DOWNLOAD
                 and _STATE_NAMES.get(t.state.VALUE.name) not in ("failed", "aborted")}
         n = 0
-        for d in dirs or []:
-            for f in d.files:
-                full = f.filename if ("\\" in f.filename or "/" in f.filename) else f"{d.name}\\{f.filename}"
-                if (user, full) in have:
-                    continue  # already downloaded or on its way
-                await self.client.transfers.download(user, full)
+        for entry in batch:
+            if entry.path not in have:
+                await self.download(user, entry.path, entry.size)
                 n += 1
         return n
+
+    def _listed_files(self, directory) -> Iterator[FileEntry]:
+        for file in directory.files:
+            path = _listed_path(directory.name, file.filename)
+            if path is not None:
+                attrs = self._attrs(file)
+                yield FileEntry(path, file.filesize, (file.extension or ext_of(path)).lower(),
+                                attrs["bitrate"], attrs["duration"])
 
     def _view(self, t) -> Xfer:
         from aioslsk.transfer.model import TransferDirection
@@ -500,13 +548,7 @@ class SlskEngine(Engine):
         out = []
         for group, is_locked in ((dirs, False), (locked, True)):
             for d in group:
-                files = []
-                for f in d.files:
-                    full = f"{d.name}\\{f.filename}"
-                    a = self._attrs(f)
-                    files.append(FileEntry(full, f.filesize, (f.extension or ext_of(f.filename)).lower(),
-                                           a["bitrate"], a["duration"]))
-                out.append(Folder(d.name, files, is_locked))
+                out.append(Folder(d.name, list(self._listed_files(d)), is_locked))
         return out
 
     async def user_info(self, user: str) -> UserCard:

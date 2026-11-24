@@ -35,3 +35,10 @@ def test_pick_prefers_exact_size_and_free_slot():
     assert pick_alternative(x(), hits).user == "free"
     assert pick_alternative(x(), [h("ann")]) is None
     assert good_enough(x(), hits) and not good_enough(x(), hits[:2])
+
+
+def test_automatic_switch_requires_a_matching_name_suffix_and_known_size():
+    assert match_score(x(), h("bob", path="other.flac"), auto=True) is None
+    assert match_score(x(), h("bob", path="other.txt"), auto=True) is None
+    assert match_score(x(size=0), h("bob"), auto=True) is None
+    assert match_score(x(), h("bob"), auto=True) is not None

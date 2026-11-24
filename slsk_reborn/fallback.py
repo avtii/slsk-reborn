@@ -35,11 +35,13 @@ def alt_query(path: str, max_words: int = 6) -> str:
     return " ".join(words)
 
 
-def match_score(x: Xfer, h: Hit) -> float | None:
+def match_score(x: Xfer, h: Hit, *, auto: bool = False) -> float | None:
     """None when h is not the same track as x, otherwise higher = better source."""
-    if h.user == x.user or h.locked or h.ext != ext_of(x.path):
+    if h.user == x.user or h.locked or h.ext != ext_of(x.path) or h.ext != ext_of(h.path):
         return None
     same_name = norm_name(h.path) == norm_name(x.path)
+    if auto and (not same_name or not x.size or not h.size):
+        return None
     same_size = bool(x.size) and h.size == x.size
     diff = abs(h.size - x.size) / x.size if x.size else 0.0
     if same_size:
@@ -56,11 +58,11 @@ def match_score(x: Xfer, h: Hit) -> float | None:
     return score
 
 
-def pick_alternative(x: Xfer, hits: list[Hit]) -> Hit | None:
-    scored = [(s, h) for h in hits if (s := match_score(x, h)) is not None]
+def pick_alternative(x: Xfer, hits: list[Hit], *, auto: bool = False) -> Hit | None:
+    scored = [(s, h) for h in hits if (s := match_score(x, h, auto=auto)) is not None]
     return max(scored, key=lambda sh: sh[0])[1] if scored else None
 
 
-def good_enough(x: Xfer, hits: list[Hit]) -> bool:
+def good_enough(x: Xfer, hits: list[Hit], *, auto: bool = False) -> bool:
     """Stop searching early: an exact-size copy with a free slot is as good as it gets."""
-    return any(h.free_slot and h.size == x.size and match_score(x, h) is not None for h in hits)
+    return any(h.free_slot and h.size == x.size and match_score(x, h, auto=auto) is not None for h in hits)

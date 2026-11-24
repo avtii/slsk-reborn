@@ -103,27 +103,33 @@ class TracklistView(Vertical):
             engine, bus = self.app.engine, self.app.bus
             best: Optional[Hit] = None
             for q in queries_for(r.track):
-                found: list[Hit] = []
+                best_score = float("-inf")
                 tk: Optional[int] = None
 
                 def collect(ticket: int, hits: list[Hit]) -> None:
+                    nonlocal best, best_score
                     if ticket == tk:
-                        found.extend(hits)
+                        r.results += len(hits)
+                        candidate, score = pick(hits, r.track, self.prefer_lossless)
+                        if candidate is not None and score > best_score:
+                            best, best_score = candidate, score
 
                 bus.on("search.hits", collect)
                 try:
                     tk = await engine.search(q)
                     for _ in range(int(SEARCH_WAIT / 0.5)):
                         await asyncio.sleep(0.5)
-                        h, s = pick(found, r.track, self.prefer_lossless)
-                        if h is not None and s >= GOOD_SCORE:
+                        if best_score >= GOOD_SCORE:
                             break
+                except Exception as e:
+                    r.state, r.note = "failed", type(e).__name__
+                    self._update(r)
+                    self._summary()
+                    return
                 finally:
                     bus.off("search.hits", collect)
                     if tk is not None:
                         engine.stop_search(tk)
-                r.results += len(found)
-                best, _ = pick(found, r.track, self.prefer_lossless)
                 if best is not None or not self.running:
                     break
             if not self.running:

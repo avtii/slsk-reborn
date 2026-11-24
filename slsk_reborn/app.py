@@ -15,7 +15,7 @@ from textual.widgets import Footer, Static, TabbedContent, TabPane
 from . import __version__
 from .config import Config
 from .engine import Bus, Engine, FileEntry, SlskEngine, Xfer
-from .fallback import alt_query, good_enough, pick_alternative
+from .fallback import alt_query, match_score
 from .panes import BrowsePane, ChatPane, SearchPane, SharesPane, TransfersPane
 from .player import Player, album_queue
 from .playerbar import PlayerBar
@@ -117,6 +117,7 @@ class SlskApp(App):
         self.engine: Engine = self._make_engine()
         self.player = Player()
         self._alt_running: set[tuple] = set()
+        self.auto_fallback_tried: set[tuple] = set()
         self.player.set_volume(cfg.volume)
 
     def _make_engine(self) -> Engine:
@@ -397,10 +398,10 @@ class SlskApp(App):
         if x.key in self._alt_running:
             return
         self._alt_running.add(x.key)
-        self._alternative(x, auto)
+        self._alternative(x, auto, x.state)
 
     @work
-    async def _alternative(self, x: Xfer, auto: bool) -> None:
+    async def _alternative(self, x: Xfer, auto: bool, initial_state: str) -> None:
         name = basename(x.path)
         try:
             q = alt_query(x.path)
@@ -409,11 +410,24 @@ class SlskApp(App):
                 return
             if not auto:
                 self.notify(f"Searching for “{q}”…", title="↻ other source")
-            found: list = []
+            best = None
+            best_score = float("-inf")
+            exact_free = False
+            result_count = 0
 
             def collect(ticket: int, hits: list) -> None:
-                if ticket == tk:
-                    found.extend(hits)
+                nonlocal best, best_score, exact_free, result_count
+                if ticket != tk:
+                    return
+                result_count += len(hits)
+                for hit in hits:
+                    score = match_score(x, hit, auto=auto)
+                    if score is None:
+                        continue
+                    if score > best_score:
+                        best, best_score = hit, score
+                    if hit.free_slot and hit.size == x.size:
+                        exact_free = True
 
             tk = None
             self.bus.on("search.hits", collect)
@@ -421,20 +435,29 @@ class SlskApp(App):
                 tk = await self.engine.search(q)
                 for _ in range(int(ALT_WAIT / 0.5)):
                     await asyncio.sleep(0.5)
-                    if good_enough(x, found):
+                    if exact_free:
                         break
             finally:
                 self.bus.off("search.hits", collect)
                 if tk is not None:
                     self.engine.stop_search(tk)
-            h = pick_alternative(x, found)
+            def current_transfer():
+                return next((item for item in self.engine.transfers() if item.key == x.key), None)
+
+            current = current_transfer()
+            if current is None or current.state != initial_state or (auto and not self.cfg.auto_fallback):
+                return
+            h = best
             if h is None:
-                self.notify(f"{name}: no other copy found ({len(found)} results)",
+                self.notify(f"{name}: no other copy found ({result_count} results)",
                             title="↻ other source", severity="warning", timeout=6)
                 return
             await self.engine.download(h.user, h.path, h.size)
-            if x.active:
-                await self.engine.abort(x.key)
+            if auto:
+                self.auto_fallback_tried.add((h.user, h.path, x.key[2]))
+            current = current_transfer()
+            if current is None or current.state != initial_state:
+                return
             await self.engine.remove(x.key)
             note = "free slot" if h.free_slot else f"queue {h.queue}"
             self.notify(f"{name}\n{x.user} → {h.user} ({note})", title="↻ switched source", timeout=6)
